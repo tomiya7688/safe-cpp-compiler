@@ -20,6 +20,7 @@ Safe C++ Compiler の意味論では、対応対象となるすべての操作�
 3. **実行時エラー (trap) も observable behavior の一部として保存する。**
 4. **コンパイラ固有の最適化規則を知らなければ正しく書けないコードを要求しない。**
 5. **安全性を確認するための検査は、不要であることを証明できた場合にのみ削除する。**
+6. **危険な言語機能・低レベル操作は default-deny とし、安全性を定義できたものだけ明示的に許可する。**
 
 ## 2. Safe C++ における「未定義動作なし」
 
@@ -63,10 +64,30 @@ JSON は単なる最適化フラグではなく、使用可能な Safe C++ サ�
 {
   "language": "SafeCpp",
   "version": 1,
+  "safety": {
+    "feature_policy": "default_deny",
+    "trusted_code": "runtime_only",
+    "unsafe_escape_hatch": false
+  },
   "forbid": {
     "statements": ["goto"],
     "statement_groups": [],
-    "features": ["inline_assembly"]
+    "features": [
+      "inline_assembly",
+      "raw_memory_ownership",
+      "raw_pointer_arithmetic",
+      "reinterpret_cast",
+      "const_cast",
+      "c_style_cast",
+      "placement_new",
+      "manual_lifetime",
+      "c_varargs",
+      "setjmp_longjmp",
+      "exceptions",
+      "unchecked_concurrency",
+      "compiler_intrinsics",
+      "vendor_extensions"
+    ]
   },
   "semantics": {
     "signed_overflow": "trap",
@@ -125,6 +146,72 @@ JSON は単なる最適化フラグではなく、使用可能な Safe C++ サ�
 
 禁止判定は単純な文字列検索ではなく、パース後の AST 上で行う。
 そのため、マクロなどを経由した場合でも最終的な構文として判定する。
+
+### 3.2 危険機能の default-deny
+
+Safe C++ の標準安全プロファイルは **default-deny** とする。
+つまり「C++ に存在するから使用可能」ではなく、Safe C++ が意味と安全条件を明示的に定義した機能だけを使用可能とする。
+
+未知の構文、未対応の処理系拡張、意味論が安全に固定されていない低レベル操作は compile error とする。
+MVP1/MVP2 の標準安全プロファイルには、ユーザーコードから安全規則を無効化する一般的な `unsafe` エスケープハッチを設けない。
+必要な低レベル操作は compiler/runtime/検証済み標準ライブラリの **trusted code boundary** の内部に限定する。
+
+既定で禁止する対象には少なくとも次を含める。
+
+| 分類 | 既定の扱い |
+| --- | --- |
+| inline assembly | compile error |
+| `reinterpret_cast` | compile error |
+| `const_cast` | compile error |
+| C-style cast | compile error。安全な変換は明示的な安全 cast に置き換える |
+| pointer ↔ integer の任意変換 | compile error |
+| 無関係な型の pointer 間 cast | compile error |
+| raw pointer arithmetic | compile error。範囲を証明できる checked pointer/index を使用する |
+| 未検証 raw pointer dereference | compile error または checked access へ変換 |
+| ユーザーコードでの raw `new` / `delete` | compile error |
+| `malloc` / `calloc` / `realloc` / `free` の直接利用 | compile error |
+| placement `new` | compile error |
+| 明示 destructor 呼び出し・手動 lifetime 操作 | compile error |
+| `std::launder` 等の低レベル lifetime 操作 | compile error |
+| union を用いた type punning | compile error |
+| inactive union member access | compile error |
+| C 可変長引数 (`...`, `va_list`) | compile error |
+| `setjmp` / `longjmp` | compile error |
+| `goto` | compile error |
+| exception (`throw` / `try` / `catch`) | MVP の標準安全プロファイルでは compile error |
+| 未検証の thread/shared mutable state | compile error |
+| data race の可能性を除去できない並行処理 | compile error |
+| compiler intrinsic / builtin | allowlist にないものは compile error |
+| vendor-specific attribute / pragma / extension | allowlist にないものは compile error |
+| unchecked memory/string API | compile error または checked wrapper のみ許可 |
+| function pointer の不正 cast | compile error |
+| ABI を破る呼び出し規約 cast | compile error |
+| 未定義・未規定の結果に依存するコード | 明示的に定義できなければ compile error |
+
+ここで「禁止」は、機能そのものを永久に排除するという意味ではない。
+Safe C++ 側で安全な意味論、必要な runtime check、最適化時の保存条件を定義できた機能は、将来 allowlist に追加できる。
+
+### 3.3 raw memory の原則
+
+Safe C++ のユーザーコードでは、メモリ所有権を raw pointer と手動解放で表現しないことを既定とする。
+
+```cpp
+int* p = new int[100];
+delete[] p;
+```
+
+のようなコードは標準安全プロファイルでは拒否し、所有権と寿命が追跡可能なコンテナ、所有型、checked reference/view を使用する。
+
+compiler/runtime 自身が内部で allocation を必要とすることは認めるが、その実装は trusted code boundary としてユーザーコードから分離する。
+これにより `free` / `delete` 忘れ、double free、use-after-free、allocator mismatch を通常のユーザーコードから原則として排除する。
+
+### 3.4 ライブラリ API も安全性検査の対象
+
+危険操作は構文だけでなく、呼び出される API にも存在する。
+そのため Policy Checker は AST の構文に加えて、解決済みの関数・メソッド呼び出しも確認する。
+
+未検証の C memory/string API、危険な system API、compiler builtin 等は既定で拒否し、
+Safe C++ 用に意味論を定義した checked wrapper または allowlist 済み API のみ許可する。
 
 ## 4. Safe IR
 
