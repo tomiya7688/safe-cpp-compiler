@@ -20,6 +20,7 @@ The core design principles are:
 3. **Treat runtime errors (traps) as part of observable behavior and preserve them.**
 4. **Do not require programmers to know compiler-specific optimization rules to write correct code.**
 5. **Remove safety checks only when their redundancy has been proven.**
+6. **Use default-deny for dangerous language features and low-level operations; explicitly allow only features with defined safety semantics.**
 
 ## 2. No Undefined Behavior in Safe C++
 
@@ -63,10 +64,30 @@ Example:
 {
   "language": "SafeCpp",
   "version": 1,
+  "safety": {
+    "feature_policy": "default_deny",
+    "trusted_code": "runtime_only",
+    "unsafe_escape_hatch": false
+  },
   "forbid": {
     "statements": ["goto"],
     "statement_groups": [],
-    "features": ["inline_assembly"]
+    "features": [
+      "inline_assembly",
+      "raw_memory_ownership",
+      "raw_pointer_arithmetic",
+      "reinterpret_cast",
+      "const_cast",
+      "c_style_cast",
+      "placement_new",
+      "manual_lifetime",
+      "c_varargs",
+      "setjmp_longjmp",
+      "exceptions",
+      "unchecked_concurrency",
+      "compiler_intrinsics",
+      "vendor_extensions"
+    ]
   },
   "semantics": {
     "signed_overflow": "trap",
@@ -125,6 +146,73 @@ The `jump` group includes at least:
 
 Prohibitions are checked on the parsed AST, not with simple string matching.
 This makes the policy apply to the resulting syntax even when macros are involved.
+
+### 3.2 Default-deny for dangerous features
+
+The standard Safe C++ safety profile is **default-deny**.
+A feature is not usable merely because it exists in C++; only features for which Safe C++ explicitly defines semantics and safety conditions are allowed.
+
+Unknown syntax, unsupported implementation extensions, and low-level operations whose semantics have not been made safe are compile errors.
+The standard MVP1/MVP2 safety profiles do not provide a general user-code `unsafe` escape hatch that disables safety rules.
+Low-level operations required by the implementation are restricted to a **trusted code boundary** containing the compiler, runtime, and verified standard-library components.
+
+The default forbidden set includes at least:
+
+| Category | Default behavior |
+| --- | --- |
+| inline assembly | compile error |
+| `reinterpret_cast` | compile error |
+| `const_cast` | compile error |
+| C-style cast | compile error; safe conversions use explicit safe casts |
+| arbitrary pointer ↔ integer conversion | compile error |
+| casts between unrelated pointer types | compile error |
+| raw pointer arithmetic | compile error; use checked pointers/indexes with provable bounds |
+| unverified raw pointer dereference | compile error or lower to checked access |
+| raw `new` / `delete` in user code | compile error |
+| direct `malloc` / `calloc` / `realloc` / `free` | compile error |
+| placement `new` | compile error |
+| explicit destructor calls and manual lifetime manipulation | compile error |
+| low-level lifetime operations such as `std::launder` | compile error |
+| union-based type punning | compile error |
+| access to an inactive union member | compile error |
+| C varargs (`...`, `va_list`) | compile error |
+| `setjmp` / `longjmp` | compile error |
+| `goto` | compile error |
+| exceptions (`throw` / `try` / `catch`) | compile error in the standard MVP safety profile |
+| unverified threads/shared mutable state | compile error |
+| concurrency where data races cannot be excluded | compile error |
+| compiler intrinsics / builtins | compile error unless allowlisted |
+| vendor-specific attributes / pragmas / extensions | compile error unless allowlisted |
+| unchecked memory/string APIs | compile error or checked wrappers only |
+| invalid function-pointer casts | compile error |
+| calling-convention casts that violate the ABI | compile error |
+| code depending on undefined or unspecified results | compile error unless semantics are explicitly defined |
+
+"Forbidden" does not mean a feature can never be supported.
+A feature may be added to the allowlist in the future after Safe C++ defines safe semantics, required runtime checks, and optimizer preservation rules for it.
+
+### 3.3 Raw-memory principle
+
+By default, Safe C++ user code does not represent memory ownership with raw pointers and manual deallocation.
+
+```cpp
+int* p = new int[100];
+delete[] p;
+```
+
+Code of this form is rejected by the standard safety profile.
+Users should instead use containers, ownership types, and checked references/views whose ownership and lifetime can be tracked.
+
+The compiler/runtime may internally allocate memory when required, but such implementation code belongs to the trusted code boundary and is separated from ordinary user code.
+This is intended to remove forgotten `free` / `delete`, double-free, use-after-free, and allocator mismatch from normal user code by construction.
+
+### 3.4 Library APIs are also subject to safety policy
+
+Dangerous operations can be hidden behind APIs rather than syntax.
+Therefore, the Policy Checker validates resolved function and method calls in addition to AST syntax.
+
+Unverified C memory/string APIs, dangerous system APIs, compiler builtins, and similar interfaces are rejected by default.
+Only checked wrappers or APIs explicitly allowlisted with Safe C++ semantics are accepted.
 
 ## 4. Safe IR
 
