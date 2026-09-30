@@ -90,7 +90,12 @@ Example:
       "exceptions",
       "unchecked_concurrency",
       "compiler_intrinsics",
-      "vendor_extensions"
+      "vendor_extensions",
+      "unsafe_c_apis",
+      "unchecked_format_io",
+      "unsafe_void_pointer",
+      "unsafe_array_decay",
+      "unchecked_raw_byte_operations"
     ]
   },
   "semantics": {
@@ -253,6 +258,43 @@ Therefore, the Policy Checker validates resolved function and method calls in ad
 
 Unverified C memory/string APIs, dangerous system APIs, compiler builtins, and similar interfaces are rejected by default.
 Only checked wrappers or APIs explicitly allowlisted with Safe C++ semantics are accepted.
+
+### 3.6 Dangerous operations inherited from C
+
+C++ has extensive compatibility with C and can use many C-derived constructs and library APIs.
+Safe C++ does not exempt them merely because they originate in C; the same safety policy applies to C-derived and C++-specific features.
+
+If the Safe C++ frontend later accepts C translation units directly, the same default-deny policy applies.
+Importing C-compatible code must not automatically weaken the safety guarantee.
+
+At minimum, the following are considered dangerous by default:
+
+| C-derived feature or API | Default behavior |
+| --- | --- |
+| unchecked string APIs such as `strcpy`, `strcat`, and `sprintf` | compile error; use checked wrappers |
+| unchecked `scanf`-family input | compile error, or only a wrapper that validates formats and destination sizes |
+| dynamic or unverified `printf`-family format strings | compile error, or only a type-checked formatting API |
+| arbitrary raw-byte operations with `memcpy`, `memmove`, or `memset` | compile error unless size, overlap, and object-representation rules are validated |
+| loss of type or ownership through `void*` | compile error; use typed checked handles/views |
+| C-array decay to a raw pointer that loses bounds | compile error at API boundaries by default; use a checked span/view that retains length |
+| raw C-string (`char*`) access with unknown length | compile error, or checked string/view with provable length |
+| C-style iterators implemented with pointer arithmetic | compile error; use checked iterators/indexes |
+| `malloc` family / `free` | compile error in user code |
+| C varargs / `va_list` | compile error |
+| `setjmp` / `longjmp` | compile error |
+| union type punning | compile error |
+| C-style casts | compile error |
+| partial use of uninitialized structs or arrays | compile error |
+| raw-byte reinterpretation that ignores the object's type | compile error |
+| compiler-specific C extensions | compile error unless allowlisted |
+
+Including a C header does not automatically make its APIs safe.
+Even when a function uses C linkage (`extern "C"`), the Safe C++ boundary validates arguments, lengths, ownership, nullability, lifetimes, and return values.
+
+External C libraries are treated as an **FFI/trusted boundary**.
+Safe C++ should expose verified wrappers and avoid exposing the raw C ABI directly to ordinary user code by default.
+
+C-derived checks may be excluded through `ignore.rules` or `ignore.files`, but the excluded scope is outside the full Safe C++ safety guarantee.
 
 ## 4. Safe IR
 
