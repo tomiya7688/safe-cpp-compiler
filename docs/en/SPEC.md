@@ -259,12 +259,41 @@ Therefore, the Policy Checker validates resolved function and method calls in ad
 Unverified C memory/string APIs, dangerous system APIs, compiler builtins, and similar interfaces are rejected by default.
 Only checked wrappers or APIs explicitly allowlisted with Safe C++ semantics are accepted.
 
-### 3.6 Dangerous operations inherited from C
+### 3.6 Mixed C / C++ projects
+
+Safe C++ Compiler **accepts both C and C++ within the same project**.
+C and C++ files living in the same repository, build, or library are treated as a normal use case.
+
+The frontend is selected from file extensions and build configuration by default:
+
+- `.c` — C frontend
+- `.cpp`, `.cc`, `.cxx` — C++ frontend
+- `.h` — follows the including translation unit's language context or explicit configuration
+- other extensions — language must be specified by JSON/build configuration
+
+The C and C++ frontends may have different syntax and type rules, but should share the Policy Checker, Safety Analyzer, and Safe IR as much as practical.
+
+```text
+C source --------> C frontend -----+
+                                   |
+                                   +--> Policy Checker
+                                   |        |
+C++ source ----> C++ frontend -----+        v
+                                      Safety Analyzer
+                                           |
+                                           v
+                                         Safe IR
+```
+
+The same default-deny safety policy applies to both C and C++ code.
+Safety rules and UB handling must not be weakened merely because a translation unit is written in C.
+
+### 3.7 Dangerous operations inherited from C
 
 C++ has extensive compatibility with C and can use many C-derived constructs and library APIs.
 Safe C++ does not exempt them merely because they originate in C; the same safety policy applies to C-derived and C++-specific features.
 
-If the Safe C++ frontend later accepts C translation units directly, the same default-deny policy applies.
+C translation units are subject to the same default-deny policy.
 Importing C-compatible code must not automatically weaken the safety guarantee.
 
 At minimum, the following are considered dangerous by default:
@@ -291,8 +320,11 @@ At minimum, the following are considered dangerous by default:
 Including a C header does not automatically make its APIs safe.
 Even when a function uses C linkage (`extern "C"`), the Safe C++ boundary validates arguments, lengths, ownership, nullability, lifetimes, and return values.
 
-External C libraries are treated as an **FFI/trusted boundary**.
-Safe C++ should expose verified wrappers and avoid exposing the raw C ABI directly to ordinary user code by default.
+C code compiled inside the same Safe C++ Compiler project is treated as ordinary checked project code rather than as an external library.
+When both sides of a C/C++ boundary are under Safe C++ Compiler control, the compiler should preserve and validate type, size, ownership, nullability, and lifetime information as far as practical.
+
+External C libraries built outside Safe C++ Compiler control are treated as an **FFI/trusted boundary**.
+For those libraries, Safe C++ should expose verified wrappers and avoid exposing the raw C ABI directly to ordinary user code by default.
 
 C-derived checks may be excluded through `ignore.rules` or `ignore.files`, but the excluded scope is outside the full Safe C++ safety guarantee.
 
