@@ -69,6 +69,10 @@ Example:
     "trusted_code": "runtime_only",
     "unsafe_escape_hatch": false
   },
+  "ignore": {
+    "rules": [],
+    "files": []
+  },
   "forbid": {
     "statements": ["goto"],
     "statement_groups": [],
@@ -147,7 +151,43 @@ The `jump` group includes at least:
 Prohibitions are checked on the parsed AST, not with simple string matching.
 This makes the policy apply to the resulting syntax even when macros are involved.
 
-### 3.2 Default-deny for dangerous features
+### 3.2 ignore
+
+`ignore` explicitly selects checks or files that are excluded from Safe C++ policy enforcement.
+
+```json
+{
+  "ignore": {
+    "rules": [
+      "no_goto",
+      "no_raw_memory"
+    ],
+    "files": [
+      "third_party/**",
+      "generated/**"
+    ]
+  }
+}
+```
+
+- `ignore.rules` — disables checks for the specified rule IDs.
+- `ignore.files` — excludes files matching the specified glob patterns from the Safe C++ policy checker.
+
+Rule IDs are stable identifiers published by the compiler.
+Diagnostics must always include the rule ID so that the same identifier can be used directly in JSON.
+
+Example:
+
+```text
+error[no_goto]: goto statement is forbidden by Safe C++ policy
+```
+
+Files matched by `ignore.files` are outside the full Safe C++ safety guarantee and are treated as a trusted/legacy boundary.
+This allows third-party libraries, generated code, and code being migrated gradually to coexist with Safe C++.
+
+`ignore` is always an explicit exception and must never be applied implicitly.
+
+### 3.3 Default-deny for dangerous features
 
 The standard Safe C++ safety profile is **default-deny**.
 A feature is not usable merely because it exists in C++; only features for which Safe C++ explicitly defines semantics and safety conditions are allowed.
@@ -191,7 +231,7 @@ The default forbidden set includes at least:
 "Forbidden" does not mean a feature can never be supported.
 A feature may be added to the allowlist in the future after Safe C++ defines safe semantics, required runtime checks, and optimizer preservation rules for it.
 
-### 3.3 Raw-memory principle
+### 3.4 Raw-memory principle
 
 By default, Safe C++ user code does not represent memory ownership with raw pointers and manual deallocation.
 
@@ -206,7 +246,7 @@ Users should instead use containers, ownership types, and checked references/vie
 The compiler/runtime may internally allocate memory when required, but such implementation code belongs to the trusted code boundary and is separated from ordinary user code.
 This is intended to remove forgotten `free` / `delete`, double-free, use-after-free, and allocator mismatch from normal user code by construction.
 
-### 3.4 Library APIs are also subject to safety policy
+### 3.5 Library APIs are also subject to safety policy
 
 Dangerous operations can be hidden behind APIs rather than syntax.
 Therefore, the Policy Checker validates resolved function and method calls in addition to AST syntax.
