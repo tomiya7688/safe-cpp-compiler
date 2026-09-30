@@ -69,6 +69,10 @@ JSON は単なる最適化フラグではなく、使用可能な Safe C++ サ�
     "trusted_code": "runtime_only",
     "unsafe_escape_hatch": false
   },
+  "ignore": {
+    "rules": [],
+    "files": []
+  },
   "forbid": {
     "statements": ["goto"],
     "statement_groups": [],
@@ -147,7 +151,43 @@ JSON は単なる最適化フラグではなく、使用可能な Safe C++ サ�
 禁止判定は単純な文字列検索ではなく、パース後の AST 上で行う。
 そのため、マクロなどを経由した場合でも最終的な構文として判定する。
 
-### 3.2 危険機能の default-deny
+### 3.2 ignore
+
+`ignore` は Safe C++ の検査から明示的に除外する対象を指定する。
+
+```json
+{
+  "ignore": {
+    "rules": [
+      "no_goto",
+      "no_raw_memory"
+    ],
+    "files": [
+      "third_party/**",
+      "generated/**"
+    ]
+  }
+}
+```
+
+- `ignore.rules` — 指定した rule ID の検査を無効化する。
+- `ignore.files` — glob 形式で指定したファイルを Safe C++ policy checker の対象外にする。
+
+rule ID はコンパイラが安定した識別子として公開する。
+診断メッセージには必ず rule ID を表示し、JSON からそのまま指定できるようにする。
+
+例:
+
+```text
+error[no_goto]: goto statement is forbidden by Safe C++ policy
+```
+
+`ignore.files` に一致したファイルは Safe C++ の完全な安全性保証の対象外とし、trusted/legacy boundary として扱う。
+これにより外部ライブラリ、生成コード、移行前コードを段階的に取り込める。
+
+`ignore` は明示的な例外設定であり、暗黙に適用してはならない。
+
+### 3.3 危険機能の default-deny
 
 Safe C++ の標準安全プロファイルは **default-deny** とする。
 つまり「C++ に存在するから使用可能」ではなく、Safe C++ が意味と安全条件を明示的に定義した機能だけを使用可能とする。
@@ -191,7 +231,7 @@ MVP1/MVP2 の標準安全プロファイルには、ユーザーコードから�
 ここで「禁止」は、機能そのものを永久に排除するという意味ではない。
 Safe C++ 側で安全な意味論、必要な runtime check、最適化時の保存条件を定義できた機能は、将来 allowlist に追加できる。
 
-### 3.3 raw memory の原則
+### 3.4 raw memory の原則
 
 Safe C++ のユーザーコードでは、メモリ所有権を raw pointer と手動解放で表現しないことを既定とする。
 
@@ -205,7 +245,7 @@ delete[] p;
 compiler/runtime 自身が内部で allocation を必要とすることは認めるが、その実装は trusted code boundary としてユーザーコードから分離する。
 これにより `free` / `delete` 忘れ、double free、use-after-free、allocator mismatch を通常のユーザーコードから原則として排除する。
 
-### 3.4 ライブラリ API も安全性検査の対象
+### 3.5 ライブラリ API も安全性検査の対象
 
 危険操作は構文だけでなく、呼び出される API にも存在する。
 そのため Policy Checker は AST の構文に加えて、解決済みの関数・メソッド呼び出しも確認する。
