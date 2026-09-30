@@ -90,7 +90,12 @@ JSON は単なる最適化フラグではなく、使用可能な Safe C++ サ�
       "exceptions",
       "unchecked_concurrency",
       "compiler_intrinsics",
-      "vendor_extensions"
+      "vendor_extensions",
+      "unsafe_c_apis",
+      "unchecked_format_io",
+      "unsafe_void_pointer",
+      "unsafe_array_decay",
+      "unchecked_raw_byte_operations"
     ]
   },
   "semantics": {
@@ -252,6 +257,44 @@ compiler/runtime 自身が内部で allocation を必要とすることは認め
 
 未検証の C memory/string API、危険な system API、compiler builtin 等は既定で拒否し、
 Safe C++ 用に意味論を定義した checked wrapper または allowlist 済み API のみ許可する。
+
+### 3.6 C 由来の危険操作
+
+C++ は C と高い互換性を持ち、多くの C 由来の構文・ライブラリ API を利用できる。
+Safe C++ では、それらを「C 由来だから例外」とせず、C++ 固有機能と同じ安全規則で検査する。
+
+Safe C++ frontend が将来 C translation unit を直接受理する場合も、同じ default-deny policy を適用する。
+C 互換コードを取り込むために安全保証を自動的に弱めてはならない。
+
+既定では少なくとも次を危険操作として扱う。
+
+| C 由来の機能・API | 既定の扱い |
+| --- | --- |
+| `strcpy`, `strcat`, `sprintf` 等の境界非検査文字列 API | compile error。checked wrapper を使用 |
+| `scanf` 系の未検証入力 | compile error または format/出力先サイズを検証できる wrapper のみ許可 |
+| `printf` 系の動的・未検証 format string | compile error または型検証済み format API のみ許可 |
+| `memcpy`, `memmove`, `memset` の任意 raw byte 操作 | サイズ・overlap・object representation を検証できなければ compile error |
+| `void*` を用いた型・所有権の消失 | compile error。型付き checked handle/view を使用 |
+| C 配列から raw pointer への境界情報を失う decay | API 境界では原則 compile error。長さを保持する checked span/view を使用 |
+| raw C string (`char*`) の長さ不明アクセス | compile error または長さを証明できる checked string/view のみ許可 |
+| pointer arithmetic を使う C 風 iterator | compile error。checked iterator/index を使用 |
+| `malloc` family / `free` | user code では compile error |
+| C varargs / `va_list` | compile error |
+| `setjmp` / `longjmp` | compile error |
+| union type punning | compile error |
+| C-style cast | compile error |
+| 未初期化 struct/array の部分利用 | compile error |
+| object の型を無視する raw byte reinterpretation | compile error |
+| compiler-specific C extension | allowlist にないものは compile error |
+
+C ヘッダを include しただけで、その API が自動的に安全になることはない。
+呼び出し先が C linkage (`extern "C"`) であっても、Safe C++ の境界では引数、長さ、所有権、nullability、lifetime、戻り値を検査する。
+
+外部 C ライブラリとの接続は **FFI/trusted boundary** として扱う。
+Safe C++ 側には検証済み wrapper を用意し、raw C ABI を通常のユーザーコードへ直接露出しないことを既定とする。
+
+`ignore.rules` または `ignore.files` で C 由来の検査を除外することはできるが、
+その範囲は Safe C++ の完全な安全保証の対象外となる。
 
 ## 4. Safe IR
 
