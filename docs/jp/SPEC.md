@@ -258,12 +258,41 @@ compiler/runtime 自身が内部で allocation を必要とすることは認め
 未検証の C memory/string API、危険な system API、compiler builtin 等は既定で拒否し、
 Safe C++ 用に意味論を定義した checked wrapper または allowlist 済み API のみ許可する。
 
-### 3.6 C 由来の危険操作
+### 3.6 C / C++ 混在プロジェクト
+
+Safe C++ Compiler は **同一プロジェクト内の C と C++ の両方を受理する**。
+C と C++ が同じリポジトリ、同じビルド、同じライブラリ内に存在することを通常の利用形態として扱う。
+
+原則として拡張子とビルド設定から frontend を選択する。
+
+- `.c` — C frontend
+- `.cpp`, `.cc`, `.cxx` — C++ frontend
+- `.h` — include した translation unit の言語文脈または明示的な設定に従う
+- その他の拡張子 — JSON/build configuration で言語を明示する
+
+C frontend と C++ frontend は別の構文・型規則を持ってよいが、その後は可能な限り共通の Policy Checker / Safety Analyzer / Safe IR を利用する。
+
+```text
+C source --------> C frontend -----+
+                                   |
+                                   +--> Policy Checker
+                                   |        |
+C++ source ----> C++ frontend -----+        v
+                                      Safety Analyzer
+                                           |
+                                           v
+                                         Safe IR
+```
+
+C と C++ のどちらで書かれたコードにも同じ default-deny safety policy を適用する。
+言語が C だからという理由で、安全規則や UB の扱いを弱めてはならない。
+
+### 3.7 C 由来の危険操作
 
 C++ は C と高い互換性を持ち、多くの C 由来の構文・ライブラリ API を利用できる。
 Safe C++ では、それらを「C 由来だから例外」とせず、C++ 固有機能と同じ安全規則で検査する。
 
-Safe C++ frontend が将来 C translation unit を直接受理する場合も、同じ default-deny policy を適用する。
+C translation unit に対しても同じ default-deny policy を適用する。
 C 互換コードを取り込むために安全保証を自動的に弱めてはならない。
 
 既定では少なくとも次を危険操作として扱う。
@@ -290,8 +319,11 @@ C 互換コードを取り込むために安全保証を自動的に弱めては
 C ヘッダを include しただけで、その API が自動的に安全になることはない。
 呼び出し先が C linkage (`extern "C"`) であっても、Safe C++ の境界では引数、長さ、所有権、nullability、lifetime、戻り値を検査する。
 
-外部 C ライブラリとの接続は **FFI/trusted boundary** として扱う。
-Safe C++ 側には検証済み wrapper を用意し、raw C ABI を通常のユーザーコードへ直接露出しないことを既定とする。
+同一 Safe C++ Compiler プロジェクト内でコンパイルされる C コードは、外部ライブラリではなく通常の検査対象として扱う。
+C と C++ の境界でも、両側が Safe C++ Compiler の管理下にあるなら型、サイズ、所有権、nullability、lifetime 情報を可能な限り保持して検査する。
+
+一方、Safe C++ Compiler の管理外でビルドされた外部 C ライブラリとの接続は **FFI/trusted boundary** として扱う。
+その場合は検証済み wrapper を用意し、raw C ABI を通常のユーザーコードへ直接露出しないことを既定とする。
 
 `ignore.rules` または `ignore.files` で C 由来の検査を除外することはできるが、
 その範囲は Safe C++ の完全な安全保証の対象外となる。
