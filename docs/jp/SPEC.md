@@ -2,305 +2,246 @@
 
 > **正本 (Authoritative Specification)**
 >
-> 日本語版 `docs/jp/*.md` を正本とする。`docs/en/*.md` は翻訳であり、差異がある場合は日本語版を優先する。
+> 日本語版 `docs/jp/*.md` を正本とする。英語版は翻訳であり、差異がある場合は日本語版を優先する。
 
 ## 1. 目的
 
-Safe C++ Compiler は C と C++ を入力として受け取り、未定義動作やコンパイラ固有の危険な最適化によって、ソースから予測しにくい意味変更が発生することをできるだけ防ぐコンパイラである。
+Safe C++ Compiler は、通常の C/C++ をできるだけそのまま使いながら、危険な操作と未定義動作を検出・定義し、危険な最適化前提を含まない LLVM IR を生成することを目的とする。
 
-中心原則:
+設計は **「危険な機能を大量に禁止する」より「一般的に安全なコードを普通に通し、危険な箇所だけ unsafety として扱う」** 方針を取る。
 
-1. **証明できない最適化は行わない。**
-2. **未定義動作を最適化の自由として利用しない。**
-3. **未定義動作になり得る操作には defined result / defined trap / compile error のいずれかを与える。**
-4. **trap も observable behavior として扱い、勝手に削除・移動しない。**
-5. **危険な C/C++ 機能は default-deny とする。**
-6. **backend や最適化レベルが変わっても Safe C/C++ の意味を変えない。**
-7. **MVP1 は高速な安全化変換、MVP2 は正しさ優先の source-aware optimizer とする。**
+## 2. 基準言語規格
 
-## 2. 非目標
+現時点の安定版規格を基準とする。
 
-初期段階では次を目標にしない。
+- C++: **ISO/IEC 14882:2024**（一般に C++23）
+- C: **ISO/IEC 9899:2024**（一般に C23）
 
-- C/C++ 規格の全機能を完全実装すること
-- GCC/Clang と完全に同じ最適化結果を出すこと
-- 既存コードをすべて無変更で受理すること
-- コンパイラ実装そのものにバグが絶対存在しないことを数学的に保証すること
-- MVP1 で最高性能の機械語を生成すること
+C++26 など未発行の draft standard は既定言語モードにしない。
+将来新しい ISO International Standard が正式発行された場合、次の compiler language-version update で基準を更新する。
 
-安全な意味をまだ定義できない機能は compile error としてよい。
+同一 project 内で C23 と C++23 を混在してよい。
 
-## 3. 用語
+## 3. 基本原則
 
-### 3.1 Safe code
+1. 一般的に安全で、意味を定義できる標準 C/C++ は普通に受理する。
+2. 危険性が高い、または安全な意味を維持できない操作は `unsafety error` とする。
+3. 意味は定義できるが注意が必要な操作は `unsafety warning` とする。
+4. C/C++ の UB を LLVM optimization の自由として流さない。
+5. UB になり得る操作は defined result / runtime trap / unsafety error のいずれかへ変換する。
+6. trap と observable side effect の順序を勝手に変更しない。
+7. LLVM IR を出力する前後で検査し、**Safe LLVM Validator を通過した IR だけを MVP1 の正式出力**とする。
+8. 証明できない最適化は MVP2 で行わない。
 
-Policy Checker と Safe C/C++ 意味論の対象となり、完全な安全保証範囲に入るコード。
+## 4. 診断モデル
 
-### 3.2 Ignored code
+### 4.1 unsafety error
 
-`ignore.files` または `ignore.rules` により検査の一部または全部を外したコード。除外範囲について完全な安全保証は行わない。
+安全な意味を保証できない、または明確に危険な操作。
 
-### 3.3 Trusted boundary
+compile を停止する。
 
-compiler runtime、検証済み標準ライブラリ、外部 FFI wrapper など、低レベル操作を閉じ込める境界。通常のユーザーコードに一般的な `unsafe` escape hatch は設けない。
-
-### 3.4 Defined trap
-
-危険条件を実行時に検出し、規定された trap reason を伴って停止する動作。trap は未定義動作ではない。
-
-### 3.5 Observable behavior
-
-I/O、明示的な volatile/atomic 操作、外部呼び出し、副作用、trap とその順序など、Safe C/C++ の意味として保存すべき動作。
-
-## 4. 入力言語とプロジェクト
-
-同一プロジェクト内の C と C++ を両方受理する。
-
-- `.c` — C frontend
-- `.cpp`, `.cc`, `.cxx` — C++ frontend
-- `.h` — include 元の言語文脈または明示設定
-- その他 — build/config で言語指定
+例:
 
 ```text
-C source --------> C frontend -----+
-                                   |
-                                   +--> Policy Checker
-                                   |        |
-C++ source ----> C++ frontend -----+        v
-                                      Safety Analyzer
-                                           |
-                                           v
-                                   Safe semantics / Safe IR
+unsafety error: use of uninitialized value
+  --> src/main.c:18:9
 ```
 
-同一プロジェクト内で Safe C++ Compiler がコンパイルする C コードは外部コード扱いしない。
+### 4.2 unsafety warning
 
-## 5. Safe C/C++ の意味論
+compile は可能で、生成される Safe LLVM IR の意味も定義できるが、一般的に危険・脆弱・意図確認が必要な操作。
 
-対応するすべての操作を次のいずれかへ分類する。
+例:
 
-1. **Defined result** — 結果を明示的に定義する。
-2. **Defined trap** — 実行時エラーとして定義する。
-3. **Compile error** — 安全な意味を定義できない、または policy で禁止する。
+```text
+unsafety warning: raw pointer crosses an external FFI boundary
+  --> src/legacy.cpp:42:5
+```
 
-Safe code 内に「何が起きてもよい」という第四の状態を残さない。
+warning があるからといって UB を LLVM に残してよいわけではない。
 
-### 5.1 主要既定値
+### 4.3 rule key
 
-| 操作 | 既定 |
+JSON の `ignore.rules` 用に内部的な stable rule key を持つ。
+通常の表示は `unsafety error` / `unsafety warning` を中心とし、rule key は verbose/JSON diagnostics で表示できる。
+
+## 5. 一般的に安全として受理するもの
+
+標準規格に適合し、Safe C++ Compiler が意味を保持できる限り、次のような通常コードは原則受理する。
+
+- function / variable / namespace
+- if / switch / for / while / do
+- break / continue / return
+- struct / class / enum
+- constructor / destructor / RAII
+- template / constexpr / concepts
+- references
+- standard arithmetic（危険条件は check）
+- automatic/static storage
+- standard containers / strings など、既知の通常 API
+- exceptions など標準機能（実装が安全に lower できる場合）
+- C の通常の function / struct / enum / array
+
+「C++ の機能だから危険」「C の機能だから危険」と一括禁止しない。
+
+## 6. unsafety error の代表例
+
+次は安全性を保証できない限り error。
+
+- 未初期化 read
+- null dereference を回避できないコード
+- bounds を定義できない out-of-bounds access
+- use-after-lifetime
+- double free / invalid free
+- allocator mismatch
+- data race を避けられない操作
+- 不正 alignment
+- invalid function pointer call
+- 不正 ABI/calling convention
+- inline assembly（MVPでは解析不能）
+- compiler intrinsic / extension で意味を検証できないもの
+- 未検証の object representation 書き換え
+- Safe LLVM Validator が拒否する LLVM IR
+
+## 7. warning の代表例
+
+安全な lowering はできるが注意を促したいもの。
+
+- raw pointer の外部 FFI 受け渡し
+- narrowing conversion
+- C-style cast のうち安全に意味を確定できるもの
+- `void*` を使う legacy API
+- bounds 情報を失うが直後に安全 wrapper へ入る array decay
+- format string API で static validation が限定的なケース
+- ignore.rules / ignore.files による検査除外
+
+warning を error に上げる strict mode は将来提供できる。
+
+## 8. UB の扱い
+
+代表既定:
+
+| 操作 | Safe C/C++ |
 | --- | --- |
-| signed integer overflow | trap |
-| unsigned integer overflow | wrap |
-| division by zero | trap |
-| signed MIN / -1 | trap |
-| null dereference | trap |
-| array/span out of bounds | trap |
-| invalid shift | trap |
-| invalid alignment | trap |
-| invalid pointer arithmetic | trap または compile error |
-| uninitialized read | compile error |
-| use-after-lifetime | trap または compile error |
-| data race | compile error |
-| unsupported unsafe operation | compile error |
+| signed overflow | runtime trap |
+| unsigned overflow | standard wrap |
+| division by zero | runtime trap |
+| signed MIN / -1 | runtime trap |
+| invalid shift | runtime trap |
+| null dereference | static error または runtime trap |
+| out of bounds | static error または runtime trap |
+| invalid alignment | static error または runtime trap |
+| uninitialized read | unsafety error |
+| use-after-lifetime | unsafety error または runtime trap |
+| unsupported UB source | unsafety error |
 
-詳細は [RULES.md](RULES.md)。
+## 9. C / C++ 混在
 
-## 6. default-deny
+- `.c`: C23
+- `.cpp` / `.cc` / `.cxx`: C++23
+- header: include 元の言語文脈
 
-安全意味論が定義され、実装が対応している機能だけを許可する。
+同じ project で両方を解析し、可能な限り型、bounds、ownership、lifetime 情報を C/C++ 境界でも保持する。
 
-代表的な既定禁止:
+## 10. C API
 
-- inline assembly
-- `reinterpret_cast` / `const_cast` / C-style cast
-- 任意 pointer ↔ integer cast
-- raw pointer arithmetic
-- raw `new/delete`
-- `malloc/calloc/realloc/free` の直接利用
-- placement new / manual lifetime
-- union type punning / inactive member access
-- C varargs / `va_list`
-- `setjmp/longjmp`
-- `goto`
-- MVP 標準プロファイルでの exceptions
-- 未検証 shared mutable concurrency
-- allowlist 外 intrinsic / builtin / vendor extension
-- 危険な C memory/string API
-- 未検証 format I/O
-- 型・所有権を失う `void*`
-- bounds を失う array-to-pointer decay
-- 任意 raw byte reinterpretation
+C API は名前だけで全面禁止しない。
 
-## 7. メモリ・所有権・寿命
+compiler が安全条件を検証できる場合は通す。
+検証できない危険 API は unsafety error、部分的にしか検証できないが defined lowering が可能なら warning。
 
-Safe code では所有権を raw pointer と手動解放で表現しないことを既定とする。container、owner type、checked reference、span/view を利用する。
+例:
 
-raw pointer dereference は、null、lifetime、alignment、型、bounds の必要条件を満たすことを証明するか runtime check を行う。
+- `memcpy`: size / overlap / object representation を確認
+- `printf` family: format が static なら型整合を検証
+- `scanf` family: destination size を確認できなければ warning/error
+- `strcpy` 等: destination bounds を証明できなければ error
 
-bounds check は安全を証明できた場合のみ削除できる。
+## 11. FFI
 
-use-after-lifetime を backend の UB として渡してはならない。静的に分かれば compile error、必要なら runtime trap を使用する。
+Safe C++ Compiler 管理外の library は FFI boundary とする。
 
-## 8. 整数・浮動小数点・変換
+FFI 自体は許可するが、pointer/buffer/lifetime/ownership が不明な境界は warning または error。
+可能なら wrapper annotation / config で契約を与える。
 
-signed overflow は既定 trap。unsigned overflow は modulo wrap。
+## 12. JSON policy
 
-負の shift count や型幅以上の shift は trap または compile error。
+既定: `safe-cpp.json`。
 
-情報損失、object model 破壊、ownership/lifetime 消失を伴う cast は既定禁止。
+- `ignore.rules`
+- `ignore.files`
+- warning/error severity override
+- target
+- LLVM validation policy
 
-浮動小数点は MVP では通常の target/IEEE 意味を保ち、fast-math、reassociation、NaN/Inf 不在仮定を既定禁止する。
+詳細は [CONFIG.md](CONFIG.md)。
 
-## 9. 制御フロー
+## 13. LLVM IR pipeline
 
-通常の `if`、loop、call/return は利用可能。
-
-`goto` は既定禁止。`break`、`continue`、`return` は JSON で個別または `jump` group として禁止可能。
-
-MVP 標準プロファイルでは `throw/try/catch` を禁止する。
-
-## 10. C 由来の危険操作
-
-C コードにも同じ safety policy を適用する。
-
-代表例:
-
-- `strcpy`, `strcat`, `sprintf`
-- 未検証 `scanf`
-- 動的・未検証 format string の `printf`
-- 任意 `memcpy/memmove/memset`
-- 型情報を失う `void*`
-- 長さ不明 `char*`
-- pointer arithmetic ベース iterator
-- raw allocation/free
-- varargs
-- setjmp/longjmp
-- union type punning
-- 未初期化 aggregate の部分利用
-
-## 11. 外部ライブラリと FFI
-
-Safe C++ Compiler 管理外でビルドされた C/C++ library は trusted/FFI boundary とする。
-
-raw ABI を Safe code へ直接露出する代わりに、検証済み wrapper を既定とする。wrapper は可能な範囲で型、nullability、buffer length、ownership、lifetime、thread-safety、error semantics を定義する。
-
-`extern "C"` だけでは安全とはみなさない。
-
-## 12. プリプロセッサ・マクロ
-
-MVP は既存 frontend の preprocessing を利用してよい。
-
-policy 判定は文字列検索ではなく preprocess/parse 後の AST と resolved call を中心に行う。診断には可能なら macro expansion location と spelling location を含める。
-
-allowlist 外 pragma/attribute/builtin/vendor extension は禁止する。
-
-## 13. 標準ライブラリ/API
-
-ライブラリ名だけで安全扱いしない。API ごとに safety model を定義し、必要なら checked wrapper を用意する。
-
-## 14. JSON policy
-
-既定設定ファイルは project root の `safe-cpp.json`。`--config <path>` で上書き可能。
-
-正式仕様は [CONFIG.md](CONFIG.md)。
-
-- `ignore.rules` — rule 単位の除外
-- `ignore.files` — glob 単位の除外
-- `forbid` — 追加禁止
-- `semantics` — trap/wrap/compile_error
-- `optimizer` — optimizer safety constraint
-- `target` — ABI/architecture
-
-ignore 範囲は完全な Safe C/C++ 保証外。
-
-## 15. 診断
-
-安定した rule ID を必須とする。
+MVP1 の正式 pipeline:
 
 ```text
-error[no_goto] src/main.cpp:18:5: goto statement is forbidden
-note: ignored rules/files are outside the full safety guarantee
+C23 / C++23
+    |
+    v
+Clang frontend / AST
+    |
+    v
+Safety Analyzer + Rewriter
+    |
+    v
+LLVM IR
+    |
+    +--> LLVM structural verifier
+    |
+    +--> Safe LLVM Validator
+    |
+    v
+Validated LLVM IR   <-- MVP1 output
 ```
 
-原則として severity、rule ID、file、line/column、message、必要な note/fix hint を含める。
+MVP1 の完成条件は machine code 生成ではなく、**検証済み LLVM IR を生成できること**。
 
-## 16. Safe IR
+## 14. Safe LLVM Validator
 
-Safe IR は backend に UB の自由を渡さないための中間意味論。
+Validator は arbitrary LLVM IR の完全な形式証明器ではなく、Safe C++ Compiler が生成する LLVM subset の独立検査層。
 
-Invariant:
+最低限:
 
-- undef/poison 相当を作らない
-- UB 前提の unreachable を作らない
-- trap を明示する
-- checked arithmetic/memory access を表現する
-- source/type/lifetime/bounds 情報を必要に応じて保持する
+- LLVM module verifier に合格
+- `undef` / `poison` を安全値として利用していない
+- 未証明 `nsw` / `nuw` を拒否
+- 未証明 `inbounds` を拒否
+- fast-math flags を拒否
+- UB を根拠にした `unreachable` を拒否
+- 未証明 `llvm.assume` を拒否
+- 未証明 nonnull / dereferenceable / noalias / alignment 属性を拒否
+- trap/check が必要な lowering が規定 pattern を満たすことを検査
+- Safe C++ Compiler runtime/helper の宣言と ABI を検査
 
-詳細は [IR.md](IR.md)。
+MVP1 は proof metadata に頼りすぎず、危険な属性を基本的に生成しない方針から始める。
 
-MVP1 は Safe IR を完全 materialize せず AST から conservative LLVM IR へ直接 lower してもよいが、同じ invariant を守る。
+## 15. MVP2
 
-## 17. LLVM lowering
+MVP2 は validated LLVM IR を作るだけでなく、元 C/C++ AST / semantic information を保持した optimizer を含む。
 
-証明なしに以下を付与・生成してはならない。
-
-- `nsw` / `nuw`
-- `getelementptr inbounds`
-- UB を根拠にした `unreachable`
-- 未証明 `llvm.assume`
-- fast-math flags
-- 未証明 nonnull/dereferenceable/alignment/noalias/provenance attributes
-
-trap は optimization 後も意味が保存される形に lower する。
-
-## 18. optimizer invariant
-
-最適化は次を証明できる場合のみ許可する。
+最適化は
 
 ```text
 SafeMeaning(before) == SafeMeaning(after)
 ```
 
-「元の C/C++ では UB だから経路は存在しない」という証明は禁止。
+を証明できる場合だけ行う。
 
-Dead Code Elimination は結果未使用、副作用なし、trap 不可能をすべて証明した場合のみ許可。
+## 16. 文書
 
-speculative load、reorder、check elimination も trap/side-effect の順序を壊してはならない。
+- [SPEC.md](SPEC.md)
+- [CONFIG.md](CONFIG.md)
+- [RULES.md](RULES.md)
+- [IR.md](IR.md)
+- [MVP.md](MVP.md)
 
-## 19. Portability
-
-同じ source、`safe-cpp.json`、compiler version、target profile に対し、同じ Safe observable behavior を与えることを目標とする。
-
-ABI、pointer width、endianness 等は明示 target profile に属する。
-
-## 20. MVP
-
-正式範囲は [MVP.md](MVP.md)。
-
-**MVP1:** C/C++ → policy/safety check → conservative LLVM IR → LLVM backend。コンパイル速度優先。
-
-**MVP2:** source-aware optimizer が元コードの意味を保持し、安全性を証明できない最適化を行わず machine code を生成。正しさ優先。
-
-## 21. Conformance
-
-最低限以下を test する。
-
-- optimization level を変えても defined observable behavior が一致
-- trap が消えない
-- forbidden operation が正しい rule ID で拒否
-- ignore.rules/files が指定範囲だけに作用
-- C/C++ 混在 project
-- LLVM IR に未証明 dangerous flags/attributes がない
-- external FFI boundary が明示される
-
-## 22. 文書一覧
-
-- [SPEC.md](SPEC.md) — 全体仕様
-- [CONFIG.md](CONFIG.md) — JSON policy
-- [RULES.md](RULES.md) — rule catalog
-- [IR.md](IR.md) — Safe IR / LLVM lowering
-- [MVP.md](MVP.md) — MVP1/MVP2
-
-## 23. ライセンス
+## 17. ライセンス
 
 MIT License。repository root の `LICENSE` を正とする。
