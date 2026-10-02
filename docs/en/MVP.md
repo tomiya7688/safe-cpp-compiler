@@ -1,132 +1,68 @@
 # MVP1 / MVP2 Specification
 
-> English translation. [docs/jp/MVP.md](../jp/MVP.md) is authoritative.
+> English translation. The Japanese version is authoritative.
 
 ## 1. MVP1
 
-> **A fast path that checks C/C++ policy/safety and emits conservative LLVM IR without dangerous unproven assumptions.**
+Goal:
+
+> **Parse the latest stable C/C++ baselines, classify dangerous operations as errors/warnings/traps, and emit validated LLVM IR.**
+
+Baselines:
+
+- C23 / ISO/IEC 9899:2024
+- C++23 / ISO/IEC 14882:2024
+
+Pipeline:
 
 ```text
-C/C++ source
-   -> Clang frontend / AST
-   -> Policy Checker
-   -> Safety Analyzer / Rewriter
-   -> Conservative LLVM IR
-   -> LLVM backend
-   -> Machine code
+C23/C++23
+ -> frontend/AST
+ -> Safety Analyzer/Rewriter
+ -> LLVM IR
+ -> LLVM Verifier
+ -> Safe LLVM Validator
+ -> Validated LLVM IR
 ```
-
-### Required functionality
-
-- mixed C/C++ project support
-- safe-cpp.json
-- stable rule IDs
-- ignore.rules / ignore.files
-- AST-based checker
-- resolved C API checks
-- default-deny
-- initial UB trap/error semantics
-- conservative LLVM IR
-- LLVM backend integration
-- optimization-level differential tests
-
-### Initial semantic set
-
-- signed overflow -> trap
-- unsigned overflow -> wrap
-- division by zero -> trap
-- signed MIN/-1 -> trap
-- null dereference -> trap
-- bounds violation -> trap
-- invalid shift -> trap
-- uninitialized read -> compile error where detectable
-- unsupported unsafe construct -> compile error
-
-Detected unsupported lifetime/data-race cases must not silently fall back to ordinary UB.
-
-### Forbidden LLVM assumptions without proof
-
-nsw, nuw, inbounds, fast-math, UB-based unreachable, unproven llvm.assume, nonnull, dereferenceable, noalias, and alignment claims.
 
 ### Definition of Done
 
-1. stable-rule-ID diagnostics
-2. rule-level ignore.rules
-3. file-level ignore.files
-4. supported UB becomes trap/error
-5. conservative LLVM IR output
-6. machine-code generation
-7. same Safe observable behavior across tested O0/O1/O2/O3-style levels
-8. dangerous LLVM flag/attribute tests
-9. C/C++ cross-call integration tests
+1. mixed C23/C++23 project support
+2. ordinary safe code is not over-rejected
+3. unsafety error / unsafety warning diagnostics
+4. major UB classes become traps/errors
+5. ignore.rules / ignore.files
+6. LLVM IR generation
+7. LLVM Verifier passes
+8. Safe LLVM Validator passes
+9. validator detects dangerous flags/attributes
+10. validated LLVM IR can be written as .ll or .bc
 
-### May be deferred
-
-- custom parser
-- custom backend
-- advanced lifetime/alias proof
-- vectorizer
-- exceptions
-- full concurrency model
-- full standard-library safety model
-- Safe IR serialization
+Machine-code generation is not mandatory for MVP1; backend smoke tests are allowed.
 
 ## 2. MVP2
 
-> **A source-aware optimizer that knows the original C/C++ meaning and emits machine code while refusing optimizations whose safety cannot be proven.**
+MVP2 adds a source-aware optimizer and machine-code generation while retaining all MVP1 safety checks.
 
-```text
-C/C++ source
-   +-----------------------------+
-   |                             |
-   v                             v
-AST / Semantic Graph          Safe IR
-   |                             |
-   +-------------+---------------+
-                 |
-                 v
-       Source-aware Optimizer
-                 |
-                 v
-           Low-level IR
-                 |
-                 v
-            Machine code
-```
-
-LLVM or a custom backend may be used for final code generation, but semantic control of optimization remains in Safe C++ Compiler.
-
-### Optimizer rule
+Only transformations proving
 
 ```text
 SafeMeaning(before) == SafeMeaning(after)
 ```
 
-If equivalence cannot be proven, the optimization is not performed.
-
-Initial candidates: constant folding, copy propagation, branch elimination, safe DCE, bounds/null-check elimination, inlining, and simple loop optimization.
+are allowed.
 
 ## 3. Difference
 
 | Item | MVP1 | MVP2 |
 | --- | --- | --- |
-| Primary goal | fast compilation | correctness-first |
-| Frontend | may use Clang | Clang or custom |
-| Optimizer | conservative LLVM usage | source-aware custom optimizer |
-| Proof | minimal | central |
-| Safe IR | logical semantics may suffice | central representation |
-| Machine code | LLVM backend | LLVM or custom |
-| Unproven optimization | do not pass dangerous assumptions | do not perform |
-| Compile speed | target faster | may be slower |
+| Language baseline | C23/C++23 | same starting baseline |
+| Diagnostics | unsafety error/warning | same |
+| Output | validated LLVM IR | machine code |
+| Optimizer | minimal/conservative | source-aware |
+| LLVM validator | required | required/equivalent validation |
+| Compile speed | priority | correctness priority |
 
-"MVP1 is faster" mainly refers to compilation speed.
+## 4. Implementation issue
 
-## 4. Tests
-
-MVP1: positive, forbidden syntax, C API, UB trap, ignore, mixed C/C++, LLVM IR patterns, optimization-level differential tests.
-
-MVP2: all MVP1 tests plus optimizer equivalence, proof-failure skip, metadata preservation, randomized/differential tests, and regression corpus.
-
-## 5. Issue workflow
-
-Once a feature is specified sufficiently for implementation, create a GitHub Issue with goal, normative spec link, scope, non-scope, acceptance criteria, tests, and unresolved questions.
+MVP1 is tracked in GitHub Issue #1.
