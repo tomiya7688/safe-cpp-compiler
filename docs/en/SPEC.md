@@ -2,305 +2,192 @@
 
 > **English translation**
 >
-> The Japanese documents under `docs/jp/*.md` are authoritative. The English documents under `docs/en/*.md` are translations. If they differ, the Japanese version takes precedence.
+> The Japanese documents under `docs/jp/*.md` are authoritative.
 
 ## 1. Purpose
 
-Safe C++ Compiler accepts C and C++ and aims to prevent hard-to-predict semantic changes caused by undefined behavior and compiler-specific dangerous optimization.
+Safe C++ Compiler accepts ordinary C and C++ while detecting or defining dangerous operations and undefined behavior, then emits LLVM IR that avoids dangerous optimization assumptions.
 
-Core principles:
+The project favors **letting generally safe code compile normally and reporting only genuinely unsafe or suspicious operations**, rather than maintaining a huge blanket deny-list.
 
-1. **Do not optimize unless the transformation is proven safe.**
-2. **Do not use undefined behavior as optimization freedom.**
-3. **Operations that would otherwise be undefined must become a defined result, defined trap, or compile error.**
-4. **A trap is observable behavior and must not be removed or moved arbitrarily.**
-5. **Dangerous C/C++ features are default-deny.**
-6. **Safe C/C++ meaning must not change merely because the backend or optimization level changes.**
-7. **MVP1 is the fast safety-oriented path; MVP2 is the correctness-first source-aware optimizer.**
+## 2. Language baselines
 
-## 2. Non-goals
+Current stable standards:
 
-Initially, the project does not require:
+- C++: **ISO/IEC 14882:2024** (commonly C++23)
+- C: **ISO/IEC 9899:2024** (commonly C23)
 
-- complete implementation of every C/C++ feature
-- optimization output identical to GCC/Clang
-- accepting every existing C/C++ program unchanged
-- a mathematical guarantee that the compiler implementation itself can never contain a bug
-- maximum machine-code performance in MVP1
+Unpublished draft standards such as C++26 are not the default language baseline.
 
-A feature whose safe meaning has not yet been defined may be rejected as a compile error.
+C23 and C++23 may coexist in the same project.
 
-## 3. Terminology
+## 3. Principles
 
-### 3.1 Safe code
+1. Accept ordinary standard C/C++ when its meaning can be preserved safely.
+2. Use `unsafety error` when safety cannot be guaranteed.
+3. Use `unsafety warning` when lowering remains defined but the construct deserves caution.
+4. Do not pass C/C++ UB through as LLVM optimization freedom.
+5. Convert UB-prone operations to a defined result, runtime trap, or unsafety error.
+6. Preserve ordering of traps and observable side effects.
+7. Only LLVM IR that passes the **Safe LLVM Validator** is an official MVP1 output.
+8. MVP2 performs only optimizations whose equivalence is proven.
 
-Code checked by the Policy Checker and Safe C/C++ semantics and covered by the full safety guarantee.
+## 4. Diagnostics
 
-### 3.2 Ignored code
+### unsafety error
 
-Code partly or fully excluded using `ignore.files` or `ignore.rules`. The excluded scope is outside the full safety guarantee.
-
-### 3.3 Trusted boundary
-
-A boundary containing low-level implementation code such as the compiler runtime, verified standard-library components, and external FFI wrappers. Normal user code has no general-purpose `unsafe` escape hatch.
-
-### 3.4 Defined trap
-
-A specified runtime failure that detects a dangerous condition and terminates execution with a defined trap reason. A trap is not undefined behavior.
-
-### 3.5 Observable behavior
-
-Behavior that Safe C/C++ semantics must preserve, including I/O, explicitly modeled volatile/atomic operations, external calls, side effects, traps, and their ordering.
-
-## 4. Input languages and projects
-
-A single project may contain both C and C++.
-
-- `.c` — C frontend
-- `.cpp`, `.cc`, `.cxx` — C++ frontend
-- `.h` — language context of the including translation unit or explicit configuration
-- other extensions — language selected by build/configuration
+Stops compilation because safe semantics cannot be guaranteed.
 
 ```text
-C source --------> C frontend -----+
-                                   |
-                                   +--> Policy Checker
-                                   |        |
-C++ source ----> C++ frontend -----+        v
-                                      Safety Analyzer
-                                           |
-                                           v
-                                   Safe semantics / Safe IR
+unsafety error: use of uninitialized value
+  --> src/main.c:18:9
 ```
 
-C code compiled inside the same project by Safe C++ Compiler is ordinary checked project code, not external code.
+### unsafety warning
 
-## 5. Safe C/C++ semantics
+Compilation may continue because defined LLVM lowering is possible, but the operation is generally risky or requires intent confirmation.
 
-Every supported operation is classified as one of:
+```text
+unsafety warning: raw pointer crosses an external FFI boundary
+  --> src/legacy.cpp:42:5
+```
 
-1. **Defined result**
-2. **Defined trap**
-3. **Compile error**
+Warnings never permit UB to remain in emitted LLVM IR.
 
-Safe code does not retain a fourth state where "anything may happen."
+Stable internal rule keys exist for JSON ignore settings but need not appear in normal human-readable diagnostics.
 
-### 5.1 Main defaults
+## 5. Generally safe code
 
-| Operation | Default |
+Ordinary standard constructs are accepted when the compiler can preserve their meaning, including functions, variables, ordinary control flow, structs/classes/enums, RAII, templates, constexpr, concepts, references, checked arithmetic, standard containers/strings, and ordinary C functions/structs/arrays.
+
+C or C++ features are not rejected merely because of the language they originate from.
+
+## 6. Representative unsafety errors
+
+- uninitialized reads
+- unpreventable null dereference
+- out-of-bounds access whose safety cannot be defined
+- use-after-lifetime
+- invalid/double free or allocator mismatch
+- unavoidable data race
+- invalid alignment
+- invalid function-pointer call or ABI mismatch
+- inline assembly in MVP
+- unverifiable intrinsics/extensions
+- unsafe object-representation manipulation
+- LLVM IR rejected by Safe LLVM Validator
+
+## 7. Representative warnings
+
+- raw pointers crossing external FFI boundaries
+- narrowing conversions
+- C-style casts whose exact defined meaning can still be preserved
+- legacy `void*` APIs
+- bounds-losing array decay immediately entering a checked wrapper
+- format APIs with limited static validation
+- ignored safety checks/files
+
+## 8. UB handling
+
+| Operation | Safe C/C++ behavior |
 | --- | --- |
-| signed integer overflow | trap |
-| unsigned integer overflow | wrap |
-| division by zero | trap |
-| signed MIN / -1 | trap |
-| null dereference | trap |
-| array/span out of bounds | trap |
-| invalid shift | trap |
-| invalid alignment | trap |
-| invalid pointer arithmetic | trap or compile error |
-| uninitialized read | compile error |
-| use-after-lifetime | trap or compile error |
-| data race | compile error |
-| unsupported unsafe operation | compile error |
+| signed overflow | runtime trap |
+| unsigned overflow | standard wrap |
+| division by zero | runtime trap |
+| signed MIN / -1 | runtime trap |
+| invalid shift | runtime trap |
+| null dereference | static error or runtime trap |
+| out of bounds | static error or runtime trap |
+| invalid alignment | static error or runtime trap |
+| uninitialized read | unsafety error |
+| use-after-lifetime | unsafety error or runtime trap |
+| unsupported UB source | unsafety error |
 
-See [RULES.md](RULES.md).
+## 9. Mixed C/C++
 
-## 6. Default-deny
+- `.c`: C23
+- `.cpp` / `.cc` / `.cxx`: C++23
+- headers follow the including language context
 
-Only features with defined safe semantics and implementation support are allowed.
+Type, bounds, ownership, and lifetime information should be preserved across C/C++ boundaries where possible.
 
-Representative default-deny features:
+## 10. C APIs
 
-- inline assembly
-- `reinterpret_cast` / `const_cast` / C-style casts
-- arbitrary pointer ↔ integer casts
-- raw pointer arithmetic
-- raw `new/delete`
-- direct `malloc/calloc/realloc/free`
-- placement new and manual lifetime manipulation
-- union type punning / inactive member access
-- C varargs / `va_list`
-- `setjmp/longjmp`
-- `goto`
-- exceptions in the standard MVP profile
-- unverified shared mutable concurrency
-- non-allowlisted intrinsics, builtins, and vendor extensions
-- dangerous C memory/string APIs
-- unchecked format I/O
-- `void*` use that loses type or ownership
-- array-to-pointer decay that loses bounds
-- arbitrary raw-byte reinterpretation
+C APIs are not banned by name alone.
 
-## 7. Memory, ownership, and lifetime
+If safety conditions can be proven, the call is accepted. If defined lowering is possible but safety confidence is limited, emit a warning. If safety cannot be guaranteed, emit an error.
 
-By default, Safe code does not represent ownership with raw pointers and manual deallocation. Containers, ownership types, checked references, and spans/views are preferred.
+Examples include checking memcpy size/overlap/object representation, validating static printf formats, validating scanf destinations, and proving destination bounds for strcpy-like calls.
 
-Raw pointer dereference requires proof or runtime checks for nullness, lifetime, alignment, type validity, and bounds as applicable.
+## 11. FFI
 
-A bounds check may be removed only after safety is proven.
+Libraries built outside Safe C++ Compiler control are FFI boundaries.
 
-Use-after-lifetime must not be passed to the backend as ordinary UB. It is a compile error when statically known, or may become a runtime trap when tracked dynamically.
+FFI itself is allowed, but unknown pointer/buffer/lifetime/ownership contracts may produce warnings or errors. Wrappers or configuration can provide contracts.
 
-## 8. Integers, floating point, and conversions
+## 12. JSON policy
 
-Signed overflow traps by default. Unsigned overflow wraps modulo the type width.
+Default file: `safe-cpp.json`.
 
-Invalid shifts trap or fail compilation.
+It configures ignore rules/files, diagnostic severity behavior, target selection, and LLVM validation. See [CONFIG.md](CONFIG.md).
 
-Casts that lose essential information, break the object model, or lose ownership/lifetime information are denied by default.
-
-For floating point, MVP keeps ordinary target/IEEE semantics and disables fast-math, reassociation, and unproven assumptions about NaN/Inf by default.
-
-## 9. Control flow
-
-Ordinary `if`, loops, calls, and returns are allowed.
-
-`goto` is denied by default. `break`, `continue`, and `return` can be forbidden individually or via the `jump` group.
-
-`throw/try/catch` are denied in the standard MVP profile.
-
-## 10. Dangerous operations inherited from C
-
-C is subject to the same safety policy.
-
-Representative cases include:
-
-- `strcpy`, `strcat`, `sprintf`
-- unchecked `scanf`
-- dynamic or unverified `printf` format strings
-- arbitrary `memcpy/memmove/memset`
-- `void*` that loses type information
-- unknown-length `char*`
-- pointer-arithmetic iterators
-- raw allocation/free
-- varargs
-- setjmp/longjmp
-- union type punning
-- partially uninitialized aggregates
-
-## 11. External libraries and FFI
-
-C/C++ libraries built outside Safe C++ Compiler control are trusted/FFI boundaries.
-
-Verified wrappers should be used instead of directly exposing raw ABI calls to Safe code. Wrappers should define type, nullability, buffer lengths, ownership, lifetime, thread-safety, and error semantics where possible.
-
-`extern "C"` alone does not make an interface safe.
-
-## 12. Preprocessor and macros
-
-MVP may use the existing frontend preprocessor.
-
-Policy checks are based primarily on the post-preprocessing AST and resolved calls, not simple source-text search. Diagnostics should include macro expansion/spelling locations when practical.
-
-Non-allowlisted pragmas, attributes, builtins, and vendor extensions are denied.
-
-## 13. Standard library and APIs
-
-An API is not automatically considered safe merely because it belongs to a standard library. A safety model or checked wrapper may be required.
-
-## 14. JSON policy
-
-The default configuration file is `safe-cpp.json` at the project root. `--config <path>` overrides it.
-
-The normative configuration specification is [CONFIG.md](CONFIG.md).
-
-- `ignore.rules` — rule-level exclusion
-- `ignore.files` — file glob exclusion
-- `forbid` — extra prohibitions
-- `semantics` — trap/wrap/compile_error choices
-- `optimizer` — optimization safety constraints
-- `target` — ABI/architecture
-
-Ignored scope is outside the full Safe C/C++ guarantee.
-
-## 15. Diagnostics
-
-Stable rule IDs are mandatory.
+## 13. LLVM pipeline
 
 ```text
-error[no_goto] src/main.cpp:18:5: goto statement is forbidden
-note: ignored rules/files are outside the full safety guarantee
+C23 / C++23
+    |
+    v
+Clang frontend / AST
+    |
+    v
+Safety Analyzer + Rewriter
+    |
+    v
+LLVM IR
+    |
+    +--> LLVM structural verifier
+    |
+    +--> Safe LLVM Validator
+    |
+    v
+Validated LLVM IR   <-- MVP1 output
 ```
 
-Diagnostics should include severity, rule ID, file, line/column, message, and notes/fix hints where useful.
+Machine-code generation is not required for MVP1 completion.
 
-## 16. Safe IR
+## 14. Safe LLVM Validator
 
-Safe IR is an intermediate semantic layer that prevents the backend from gaining UB-based freedom.
+At minimum:
 
-Invariants:
+- LLVM module verification succeeds
+- undef/poison are not used as safe values
+- unproven nsw/nuw are rejected
+- unproven inbounds GEP is rejected
+- fast-math flags are rejected
+- UB-based unreachable is rejected
+- unproven llvm.assume is rejected
+- unproven nonnull/dereferenceable/noalias/alignment claims are rejected
+- required trap/check lowering follows canonical validated patterns
+- runtime/helper declarations and ABI are checked
 
-- no undef/poison-like semantics
-- no UB-based unreachable
-- explicit traps
-- checked arithmetic and memory access
-- source/type/lifetime/bounds data retained as needed
+The validator verifies the compiler-generated safe LLVM subset; it is not a full proof system for arbitrary third-party LLVM IR.
 
-See [IR.md](IR.md).
+## 15. MVP2
 
-MVP1 may lower directly from AST to conservative LLVM IR without fully materializing Safe IR, provided equivalent invariants are preserved.
-
-## 17. LLVM lowering
-
-Without proof, the compiler must not emit or attach:
-
-- `nsw` / `nuw`
-- `getelementptr inbounds`
-- UB-based `unreachable`
-- unproven `llvm.assume`
-- fast-math flags
-- unproven nonnull/dereferenceable/alignment/noalias/provenance attributes
-
-Traps must lower in a form whose semantics survive optimization.
-
-## 18. Optimizer invariant
-
-An optimization is allowed only after proving:
+MVP2 retains source semantics and applies only transformations proving:
 
 ```text
 SafeMeaning(before) == SafeMeaning(after)
 ```
 
-Proofs based on "this path is UB in ordinary C/C++" are forbidden.
+## 16. Documents
 
-Dead-code elimination requires proof that the value is unused, there are no observable side effects, and no trap is possible.
+- [SPEC.md](SPEC.md)
+- [CONFIG.md](CONFIG.md)
+- [RULES.md](RULES.md)
+- [IR.md](IR.md)
+- [MVP.md](MVP.md)
 
-Speculative loads, reordering, and check elimination must preserve trap and side-effect ordering.
-
-## 19. Portability
-
-For the same source, `safe-cpp.json`, compiler version, and target profile, the goal is the same Safe observable behavior.
-
-ABI, pointer width, endianness, and similar properties belong to an explicit target profile.
-
-## 20. MVP
-
-See [MVP.md](MVP.md).
-
-**MVP1:** C/C++ → policy/safety checks → conservative LLVM IR → LLVM backend. Compilation speed first.
-
-**MVP2:** source-aware optimizer preserving original program meaning and refusing unproven transformations. Correctness first.
-
-## 21. Conformance
-
-Minimum testing includes:
-
-- same defined observable behavior across optimization levels
-- traps are not removed
-- forbidden operations report correct rule IDs
-- ignore.rules/files affect only the requested scope
-- mixed C/C++ projects
-- no unproven dangerous LLVM flags/attributes
-- external FFI boundaries are explicit
-
-## 22. Documents
-
-- [SPEC.md](SPEC.md) — overall specification
-- [CONFIG.md](CONFIG.md) — JSON policy
-- [RULES.md](RULES.md) — rule catalog
-- [IR.md](IR.md) — Safe IR / LLVM lowering
-- [MVP.md](MVP.md) — MVP1/MVP2
-
-## 23. License
+## 17. License
 
 MIT License. The repository-root `LICENSE` is authoritative.
