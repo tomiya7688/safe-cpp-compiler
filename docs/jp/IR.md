@@ -1,140 +1,73 @@
-# Safe IR / LLVM Lowering 仕様
+# Safe LLVM IR / Validator 仕様
 
-> 日本語版が正本。MVP1 が Safe IR を materialize しない場合でも、この invariant を守る。
+> 日本語版が正本。
 
-## 1. 目的
+## 1. MVP1 output
 
-Safe IR は frontend の意味を、backend が UB として自由に利用できない形へ固定する中間意味論。
-
-## 2. Invariant
-
-1. IR 自体に言語レベル UB を残さない。
-2. 未初期化値を arbitrary value として流さない。
-3. poison 相当を意味論に入れない。
-4. trap を明示 control effect とする。
-5. side effect と trap の相対順序を保存する。
-6. bounds/null/lifetime/alignment 情報を必要に応じて保持する。
-7. source location を保持できる。
-8. optimizer proof に必要な provenance を保持できる。
-
-## 3. 概念命令
+MVP1 の正式出力は **Validated LLVM IR**。
 
 ```text
-%r = checked_sadd i32 %a, %b
-%r = checked_sdiv i32 %a, %b
-%p = checked_index %base, %index, %length
-%v = checked_load %p
-checked_store %p, %v
-check_nonnull %p
-check_alive %object
-check_align %p, 4
-trap out_of_bounds
+AST
+ -> Safety Analyzer/Rewriter
+ -> LLVM IR
+ -> LLVM Verifier
+ -> Safe LLVM Validator
+ -> Validated LLVM IR
 ```
 
-syntax は実装時に変更可能。意味を normative とする。
+LLVM backend に渡す場合も、この validated IR を入力とする。
 
-## 4. Arithmetic
+## 2. LLVM Verifier
 
-signed add/sub/mul は overflow なら trap。proof があれば normal arithmetic に lower 可能。
+最初に LLVM 自身の module/function verifier を通す。
+構造・型・SSA 等の不正 IR は compiler error。
 
-unsigned は modulo wrap。LLVM nuw で意味を置き換えない。
+## 3. Safe LLVM Validator
 
-division は divisor != 0 と signed MIN/-1 を check。
+LLVM verifier が受理する IR でも Safe C++ Compiler の方針上危険なものがあるため、追加 validator を実行する。
 
-## 5. Memory
+MVP1 の基本方針は **危険な optimization hint/flag を極力出さない**。
 
-memory access は必要に応じて null、bounds、lifetime、alignment、read/write permission、type/representation compatibility を check。
+### 必須検査
 
-proof による check elimination は Safe semantics 上 failure 不可能な場合のみ。
+- undef value を安全値として利用していない
+- poison value を生成・利用していない
+- 未証明 nsw/nuw がない
+- 未証明 inbounds GEP がない
+- fast-math flags がない
+- UB 前提 unreachable がない
+- 未証明 llvm.assume がない
+- 未証明 nonnull/dereferenceable/noalias/alignment 属性がない
+- runtime safety helper ABI が正しい
+- trap branch/helper が消えていない
+- unsafe raw LLVM construct が compiler-defined safe subset 外にない
 
-## 6. Trap
+## 4. Checked operations
 
-trap は noreturn の defined control effect。
+signed overflow は overflow intrinsic + trap など、validator が識別可能な規定 lowering を使う。
 
-代表 reason:
+division/shift/null/bounds も validator が確認できる canonical pattern または runtime helper を使う。
 
-- signed_overflow
-- division_by_zero
-- signed_div_overflow
-- null_dereference
-- out_of_bounds
-- invalid_shift
-- invalid_alignment
-- use_after_lifetime
+MVP1 では性能より検証容易性を優先し、危険操作を helper call に lower してもよい。
 
-observable side effect と競合する場合、trap 順序を変更禁止。
+## 5. Validator の限界
 
-## 7. LLVM lowering
+MVP1 Validator は arbitrary third-party LLVM IR の完全 safety prover ではない。
 
-overflow は `llvm.*with.overflow` または等価 check sequence を使用可能。
+**Safe C++ Compiler が生成する LLVM subset が、定義した lowering contract に従っているかを独立に確認するもの**。
 
-division は安全条件 check 後に div instruction。
+外部 LLVM IR を入力として受理する機能は MVP1 の必須範囲外。
 
-null/bounds 等は branch + trap。proof がある場合だけ省略。
+## 6. Failure
 
-## 8. 証明なしに LLVM へ渡さない情報
-
-- nsw
-- nuw
-- inbounds
-- nonnull
-- dereferenceable
-- 強い alignment
-- noalias/provenance
-- llvm.assume
-- fast-math
-- UB-based unreachable
-
-証明できた場合だけ付与可能。MVP1 は多くを常に付与しない実装から開始してよい。
-
-## 9. unreachable
-
-noreturn trap/call 直後など構造的到達不能だけに使用可能。C/C++ UB を理由に使用禁止。
-
-## 10. reorder / DCE
-
-trap、external call、volatile/atomic、observable side effect の順序を壊す reorder 禁止。
-
-DCE は value 未使用、副作用なし、trap 不可能、lifetime/control effect なしをすべて証明した場合のみ。
-
-## 11. check elimination
-
-bounds/null/lifetime check を削除するには、その execution path で failure 不可能なことを証明する。
-
-## 12. source-aware metadata
-
-MVP2 で保持候補:
-
-- original AST/source range
-- C/C++ type
-- object identity
-- lifetime
-- bounds
-- ownership
-- nullability
-- alignment
-- control region
-- originating rule/policy
-
-## 13. MVP1
-
-最短実装:
+Validator failure は通常 source diagnostic ではなく compiler pipeline failure。
 
 ```text
-Clang AST
-  -> Policy Checker
-  -> Safety Rewriter
-  -> conservative LLVM IR
+compiler safety error: generated LLVM IR failed Safe LLVM validation
 ```
 
-Safe IR を file/IR object として構築しなくても、各 operation は Safe IR の defined result/trap/error 意味に対応すること。
+debug mode では該当 LLVM instruction と source location を表示する。
 
-## 14. MVP2
+## 7. MVP2
 
-source semantic graph + Safe IR を optimizer の中心に置き、
-
-```text
-SafeMeaning(before) == SafeMeaning(after)
-```
-
-を証明できる変形だけを適用する。
+MVP2 の optimizer output も Safe LLVM Validator または同等の machine-level validator を通す。
