@@ -1,93 +1,77 @@
-# Rule Catalog
+# Unsafety Rules
 
-> 日本語版が正本。rule ID は diagnostics と `ignore.rules` の安定識別子。
+> 日本語版が正本。
 
-## 1. Rule ID
+## 1. 診断レベル
 
-- lowercase snake_case
-- 意味を変えない限り rename しない
-- 別の意味に再利用しない
-- 削除後も ID を再利用しない
-- diagnostic に必ず表示
+Safe C++ Compiler の安全診断は原則として次の2種類。
 
-## 2. Policy rules
+### unsafety error
 
-| Rule ID | 既定 | 概要 |
+安全な意味を保証できないため compile を停止する。
+
+### unsafety warning
+
+Safe LLVM IR への defined lowering は可能だが、一般的に危険または意図確認が必要。compile は継続できる。
+
+通常表示は category を中心にする。
+
+```text
+unsafety error: uninitialized read
+unsafety warning: raw pointer crosses FFI boundary
+```
+
+## 2. Rule key
+
+JSON ignore 用に stable key を持つが、標準 human diagnostics で key 表示は必須ではない。
+
+代表 key:
+
+| key | default | 内容 |
 | --- | --- | --- |
-| `no_goto` | error | goto 禁止 |
-| `no_inline_asm` | error | inline asm 禁止 |
-| `no_reinterpret_cast` | error | reinterpret_cast 禁止 |
-| `no_const_cast` | error | const_cast 禁止 |
-| `no_c_style_cast` | error | C-style cast 禁止 |
-| `no_pointer_integer_cast` | error | 任意 pointer/integer cast 禁止 |
-| `no_raw_pointer_arithmetic` | error | raw pointer arithmetic 禁止 |
-| `no_raw_memory` | error | user code の raw allocation/free 禁止 |
-| `no_manual_lifetime` | error | placement new/explicit destructor 等 |
-| `no_union_punning` | error | union punning/inactive member |
-| `no_c_varargs` | error | C varargs/va_list |
-| `no_setjmp_longjmp` | error | setjmp/longjmp |
-| `no_exceptions` | error | MVP exception 禁止 |
-| `no_unchecked_concurrency` | error | 未検証並行処理 |
-| `no_unlisted_intrinsic` | error | allowlist 外 builtin |
-| `no_vendor_extension` | error | allowlist 外 extension |
-| `no_unsafe_c_api` | error | 危険 C API |
-| `no_unchecked_format_io` | error | 未検証 format I/O |
-| `no_unsafe_void_pointer` | error | 型/ownership を失う void* |
-| `no_unsafe_array_decay` | error | bounds を失う array decay |
-| `no_unchecked_raw_bytes` | error | 未検証 raw byte 操作 |
-
-## 3. Semantic rules
-
-| Rule ID | 既定 | 概要 |
-| --- | --- | --- |
-| `signed_overflow` | trap | signed overflow |
-| `division_by_zero` | trap | 0 除算 |
-| `signed_div_overflow` | trap | MIN / -1 |
-| `null_dereference` | trap | null dereference |
-| `out_of_bounds` | trap | bounds violation |
-| `invalid_shift` | trap | invalid shift |
-| `invalid_alignment` | trap | alignment violation |
-| `invalid_pointer_arithmetic` | trap/error | pointer range violation |
 | `uninitialized_read` | error | 未初期化 read |
-| `use_after_lifetime` | trap/error | lifetime 終了後 access |
-| `data_race` | error | 安全性未証明 data race |
-| `unsupported_unsafe_construct` | error | safe semantics 未定義 |
+| `null_dereference` | error/trap | null access |
+| `out_of_bounds` | error/trap | bounds violation |
+| `use_after_lifetime` | error/trap | lifetime 終了後 access |
+| `invalid_free` | error | invalid/double free |
+| `data_race` | error | safety を保証できない race |
+| `inline_asm` | error | MVP で解析できない asm |
+| `unchecked_intrinsic` | error | 未検証 intrinsic |
+| `ffi_raw_pointer` | warning | raw pointer FFI |
+| `narrowing_conversion` | warning | narrowing |
+| `legacy_void_pointer` | warning/error | void* legacy API |
+| `unchecked_format` | warning/error | format verification 不十分 |
+| `ignored_safety_check` | warning | ignore 適用 |
+
+## 3. runtime trap
+
+runtime check が可能な UB は error ではなく trap に変換できる。
+
+- signed_overflow
+- division_by_zero
+- signed_div_overflow
+- invalid_shift
+- null_dereference
+- out_of_bounds
+- invalid_alignment
+
+trap は defined behavior。
 
 ## 4. C API
 
-初期 banned/checked symbol set は実装と test で version 管理する。
+API 名だけで禁止しない。引数・buffer length・format・object representation を解析して severity を決める。
 
-少なくとも strcpy, strcat, sprintf, vsprintf、未検証 scanf family、未検証 format の printf family を対象候補とする。
+安全条件を証明できる → 通す。
 
-memcpy/memmove/memset は名前だけで永久禁止せず、size/overlap/object representation/lifetime が証明できる場合は将来許可可能。
+defined lowering は可能だが注意が必要 → unsafety warning。
 
-## 5. Diagnostics
+安全条件を保証できない → unsafety error。
 
-基本形式:
+## 5. ignore
 
-```text
-<severity>[<rule-id>] <file>:<line>:<column>: <message>
-```
+`ignore.rules` は指定 rule の policy diagnostic を除外できる。
+`ignore.files` は指定 file を safety checking の legacy boundary とする。
 
-例:
+ignore 自体について `unsafety warning` を出せる。
 
-```text
-error[no_raw_memory] src/a.c:10:12: direct malloc/free is outside the default profile
-trap[out_of_bounds] src/a.cpp:18:14
-```
-
-release mode で runtime metadata を縮小しても trap 自体を削除してはならない。
-
-## 6. ignore
-
-ignore.rules は policy diagnostic を抑制できる。
-
-semantic rule は、定義済み safe semantics があるなら semantics を維持する。未実装 semantics を ignore だけで通さない。
-
-ignore.files は file 全体を legacy/trusted boundary とする。
-
-## 7. 追加・互換性
-
-新 rule は追加可能。default-deny により未知危険 feature は unsupported_unsafe_construct で拒否できる。
-
-既存 rule の意味変更は compatibility に影響するため policy version 変更を伴う。
+ただし Safe LLVM Validator は ignore されない。危険な LLVM IR を ignore で通してはならない。
