@@ -1,6 +1,8 @@
 # JSON Policy Specification
 
 > English translation. The Japanese version is authoritative.
+>
+> This file is for safety policy only. Build/project configuration lives in [BUILD.md](BUILD.md) and `safe-build.json`.
 
 ## 1. Base configuration
 
