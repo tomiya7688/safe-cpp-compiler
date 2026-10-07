@@ -1,6 +1,8 @@
 # JSON Policy 仕様
 
 > 日本語版が正本。
+>
+> このファイルは安全性 policy 専用。build/project 構成は [BUILD.md](BUILD.md) と `safe-build.json` に分離する。
 
 ## 1. 基本
 
