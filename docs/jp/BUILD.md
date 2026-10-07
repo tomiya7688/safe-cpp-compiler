@@ -9,7 +9,7 @@
 
 Safe C++ Compiler は CMake と連携できるが、CMake と同じ複雑な build language を再実装しない。
 
-通常 project では、軽量な宣言的 JSON:
+通常 project では軽量な宣言的 JSON:
 
 ```text
 safe-build.json
@@ -17,16 +17,34 @@ safe-build.json
 
 を使用する。
 
-`safe-cpp.json` は安全性 policy、`safe-build.json` は build/project 構成として役割を分離する。
+- `safe-cpp.json` — 安全性、unsafety diagnostics、LLVM validation
+- `safe-build.json` — platform、source、target、output、link、resource staging
+
+安全 policy と build description を分離する。
 
 ## 2. 基本例
 
 ```json
 {
   "version": 1,
+
   "project": {
     "name": "sample"
   },
+
+  "platform": {
+    "arch": "x64",
+    "os": "windows",
+    "abi": "msvc"
+  },
+
+  "build": {
+    "profile": "debug",
+    "optimization": "none",
+    "debug_info": true,
+    "output_directory": "build"
+  },
+
   "inputs": {
     "source_directories": [
       "src",
@@ -37,6 +55,7 @@ safe-build.json
       "third_party/example/include"
     ]
   },
+
   "targets": {
     "app": {
       "type": "application",
@@ -47,6 +66,15 @@ safe-build.json
       "defines": [
         "APP_VERSION=1"
       ],
+      "output_name": "sample",
+      "links": {
+        "libraries": [
+          "user32"
+        ],
+        "library_directories": [
+          "vendor/lib"
+        ]
+      },
       "application_root": "Application/root",
       "copy": [
         {
@@ -63,47 +91,161 @@ safe-build.json
 }
 ```
 
-## 3. inputs
+## 3. platform
 
-### 3.1 source_directories
-
-compiler/build system が source を探索する directory。
+compile target を人間が読みやすい形で指定する。
 
 ```json
 {
-  "inputs": {
-    "source_directories": [
-      "src",
-      "lib"
-    ]
+  "platform": {
+    "arch": "x64",
+    "os": "windows",
+    "abi": "msvc"
   }
 }
 ```
 
-各 path は project root 相対を基本とする。
+### 3.1 arch
 
-source file の実際の選択は target の `sources` で絞り込める。
+初期名称:
 
-### 3.2 include_directories
+- `x64`
+- `x86`
+- `arm64`
+- `arm32`
 
-C/C++ の include search path に追加する directory。
+内部では必要に応じて LLVM の canonical architecture 名へ正規化する。
+
+例:
+
+```text
+x64   -> x86_64
+arm64 -> aarch64
+```
+
+設定形式として名称を定義することと、その target を現在の compiler build が実際にサポートすることは別である。
+未対応 target は明確な build error とする。
+
+### 3.2 os
+
+初期名称:
+
+- `windows`
+- `linux`
+- `macos`
+
+将来必要に応じて追加する。
+
+### 3.3 abi
+
+任意指定。
+
+例:
+
+- `msvc`
+- `gnu`
+- `musl`
+- `apple`
+
+省略時は os/toolchain の既定値を使用できる。
+
+### 3.4 LLVM target triple
+
+通常利用者は arch/os/abi を指定するだけでよい。
+build system が LLVM target triple を導出する。
+
+将来、上級者向けに:
 
 ```json
 {
-  "inputs": {
-    "include_directories": [
-      "include",
-      "vendor/foo/include"
-    ]
+  "platform": {
+    "triple": "x86_64-pc-windows-msvc"
   }
 }
 ```
 
-MVP では user include directory として扱う。
+の直接指定を許可できる。
 
-将来 `system_include_directories` を別に追加してよい。
+`triple` と arch/os/abi が同時指定され矛盾する場合は build error。
 
-## 4. targets
+## 4. build
+
+```json
+{
+  "build": {
+    "profile": "debug",
+    "optimization": "none",
+    "debug_info": true,
+    "output_directory": "build"
+  }
+}
+```
+
+### 4.1 profile
+
+初期値:
+
+- `debug`
+- `release`
+
+profile は便利な preset であり、安全性の強弱を意味しない。
+
+**release でも safety check や Safe LLVM Validator を無効化してはならない。**
+
+### 4.2 optimization
+
+初期値候補:
+
+- `none`
+- `basic`
+- `speed`
+- `size`
+
+MVP1 では `none` / `basic` だけ実装してもよい。
+
+optimization は Safe C++ Compiler の意味論を弱めてはならない。
+
+### 4.3 debug_info
+
+debug metadata を生成するか。
+
+```json
+{
+  "debug_info": true
+}
+```
+
+### 4.4 output_directory
+
+build artifact の base directory。
+
+project root 相対 path を基本とする。
+
+## 5. inputs
+
+### 5.1 source_directories
+
+source 探索 directory。
+
+```json
+{
+  "source_directories": ["src", "lib"]
+}
+```
+
+### 5.2 include_directories
+
+include search path。
+
+```json
+{
+  "include_directories": ["include", "vendor/foo/include"]
+}
+```
+
+将来 `system_include_directories` を追加可能。
+
+## 6. targets
 
 初期 target type:
 
@@ -113,22 +255,105 @@ MVP では user include directory として扱う。
 
 MVP では `application` を最優先で実装する。
 
-target は最低限次を持てる。
+target が持てる基本設定:
 
 - `sources`
 - `include_directories`
 - `defines`
+- `output_name`
 - `links`
 - `application_root`
 - `copy`
 
-project-level inputs と target-level設定が両方ある場合、target-level設定を追加分として扱う。
+## 7. sources
 
-## 5. application_root
+target が実際に compile する source を glob で指定できる。
 
-application target の staging/package root。
+```json
+{
+  "sources": [
+    "src/**",
+    "lib/math/*.cpp"
+  ]
+}
+```
+
+`source_directories` は探索 root、`sources` は target への選択とする。
+
+## 8. defines
+
+preprocessor define。
+
+```json
+{
+  "defines": [
+    "APP_VERSION=1",
+    "FEATURE_X"
+  ]
+}
+```
+
+値なし define と `NAME=value` を許可する。
+
+## 9. output_name
+
+target の論理出力名。
+
+```json
+{
+  "output_name": "sample"
+}
+```
+
+platform に応じた suffix/prefix は build system が付ける。
 
 例:
+
+```text
+windows application -> sample.exe
+linux application   -> sample
+```
+
+MVP1 では validated LLVM IR の出力名にも利用できる。
+
+例:
+
+```text
+build/sample.ll
+build/sample.bc
+```
+
+## 10. links
+
+```json
+{
+  "links": {
+    "libraries": [
+      "user32",
+      "mylib"
+    ],
+    "library_directories": [
+      "vendor/lib"
+    ]
+  }
+}
+```
+
+### 10.1 libraries
+
+system library または project library の論理名。
+
+### 10.2 library_directories
+
+linker の library search path。
+
+MVP1 は machine code/link が必須ではないため、設定の parse/保持だけ先に実装してもよい。
+
+将来必要なら `frameworks`、`link_options` 等を追加するが、raw linker option は通常設定より後回しとする。
+
+## 11. application_root
+
+application target の staging/package root。
 
 ```json
 {
@@ -136,15 +361,11 @@ application target の staging/package root。
 }
 ```
 
-build artifact や resource copy の配置先基準になる。
+build artifact と resource copy の配置基準。
 
-`application_root` は project root 相対 path を基本とする。
+MVP では project root 相対 path のみでよい。
 
-絶対 path を許可するかは将来の明示 option とし、MVP では相対 path のみでよい。
-
-## 6. directory copy
-
-application root へ directory/file をコピーできる。
+## 12. directory/file copy
 
 ```json
 {
@@ -161,95 +382,113 @@ application root へ directory/file をコピーできる。
 }
 ```
 
-上記は概念的に:
+概念:
 
 ```text
 assets/**          -> Application/root/assets/**
 config/default/**  -> Application/root/config/**
 ```
 
-となる。
+### 12.1 from
 
-### 6.1 copy.from
+project root 相対の file/directory。
 
-project root 相対 source path。
+### 12.2 to
 
-file または directory を指定できる。
+`application_root` 相対 path。
 
-### 6.2 copy.to
+禁止:
 
-`application_root` 相対 destination。
+- absolute destination
+- `..` による root escape
+- platform-specific trick による root escape
 
-以下は禁止:
-
-- absolute path
-- `..` による application root 外への escape
-- platform-specific path trick で root 外へ出る指定
-
-### 6.3 collision
+### 12.3 collision
 
 既定では destination collision は build error。
 
-将来:
+### 12.4 symlink
+
+application root 外へ解決される symlink は error。
+
+### 12.5 missing source
+
+存在しない `from` は build error。
+
+将来 optional resource は明示 `optional: true` を追加可能。
+
+## 13. runtime / toolchain
+
+通常必要になりやすいが platform-specific なので段階的に追加する。
+
+将来候補:
 
 ```json
 {
-  "copy_policy": {
-    "on_collision": "error"
+  "toolchain": {
+    "linker": "default",
+    "runtime": "dynamic"
   }
 }
 ```
 
-のような設定を追加可能。
+候補設定:
 
-### 6.4 symlink
+- linker 選択
+- static/dynamic runtime
+- sysroot
+- SDK path
+- Windows subsystem
+- deployment target
 
-MVP では symlink が application root 外を指す場合は error とする。
+ただし CMake のように任意 command を実行する script language にはしない。
 
-安全に解決できない symlink traversal は許可しない。
+## 14. build artifact
 
-### 6.5 missing source
+MVP1 は validated LLVM IR が中心。
 
-`copy.from` が存在しない場合は build error。
-
-将来 optional resource を追加する場合は明示的な `optional: true` を用いる。
-
-## 7. build artifact
-
-将来 machine code を生成する application target では、executable/shared resources を application root に配置できる。
-
-MVP1 は validated LLVM IR が中心なので、artifact staging は最小実装でもよい。
+例:
 
 ```text
+build/
+  sample.ll
+  sample.bc
+
 Application/root/
-  app.ll
   assets/
   config/
 ```
 
-のような staging を許可する。
+将来 machine code generation を行う場合:
 
-## 8. CMake compatibility
+```text
+Application/root/
+  sample.exe
+  assets/
+  config/
+```
 
-CMake の言語そのものを Safe C++ Compiler 内で再実装しない。
+のように配置できる。
 
-互換性の目的は:
+## 15. CMake compatibility
 
-1. 既存 CMake project を Safe C++ Compiler から利用できること
-2. CMake target の source/include/define/link 情報を取り込めること
-3. Safe C++ Compiler 固有の単純 project では CMake を書かなくてもよいこと
+CMake language を再実装しない。
 
-CMake integration は adapter として実装する。
+互換性の目的:
+
+1. 既存 CMake project を利用できる
+2. target の source/include/define/link/platform 情報を import できる
+3. Safe native project は CMake 不要
 
 初期方針:
 
-- 既存 CMake project: CMake の machine-readable project/codemodel 情報から import
-- Safe project: `safe-build.json` を直接利用
-- CMake への export は将来機能
+- CMake project: machine-readable codemodel/target information を adapter で import
+- Safe project: `safe-build.json`
+- CMake export: 将来機能
 
-CMake の全 command / macro / generator expression を独自解釈しない。
+CMake command/macro/generator expression を独自に全面解釈しない。
 
-## 9. safe-cpp.json との関係
+## 16. safe-cpp.json との関係
 
 `safe-cpp.json`:
 
@@ -260,38 +499,56 @@ CMake の全 command / macro / generator expression を独自解釈しない。
 
 `safe-build.json`:
 
-- source directories
-- include directories
+- platform / architecture / OS / ABI
+- build profile / optimization / debug info
+- source/include
 - targets
 - defines
-- links
+- output
+- link
 - application root
 - copy/staging
 - CMake adapter
 
-安全 policy と build description を混ぜない。
+## 17. path normalization
 
-## 10. path normalization
+JSON path は `/` を canonical separator とする。
 
-すべての JSON path は `/` を canonical separator とする。
+OS path への変換は build system が行う。
 
-実OSの path separator への変換は build system が行う。
+file operation 前に normalize し root escape を検査する。
 
-path 比較前に lexical normalization を行い、root escape を検査する。
+## 18. CLI override
 
-## 11. MVP build scope
+通常の build system と同様、頻繁に変える値は CLI override を将来提供できる。
 
-最初に必要なもの:
+例:
+
+```text
+safe-cpp build --arch x64 --os windows --profile release
+```
+
+JSON を書き換えず CI matrix / cross compile を行えるようにする。
+
+CLI と JSON が競合する場合は CLI を優先する。
+
+## 19. MVP build scope
+
+最初に必要:
 
 1. `safe-build.json` parser
-2. source_directories
-3. include_directories
-4. application target
-5. source glob
-6. defines
-7. application_root
-8. copy directory/file
-9. collision/root-escape 検査
-10. CMake project import adapter
+2. platform.arch / platform.os / platform.abi
+3. build.profile / optimization / debug_info / output_directory
+4. source_directories
+5. include_directories
+6. application target
+7. source glob
+8. defines
+9. output_name
+10. links の parse/保持
+11. application_root
+12. file/directory copy
+13. collision/root-escape/symlink 検査
+14. CMake import adapter
 
-library target、install、package manager、custom command、script language は後回しでよい。
+package manager、install rule、custom command、general scripting language は後回し。
