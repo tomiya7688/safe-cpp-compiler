@@ -33,7 +33,9 @@ Japanese documents are authoritative. English documents are translations.
 | Safe LLVM IR / Validator | [docs/jp/IR.md](docs/jp/IR.md) | [docs/en/IR.md](docs/en/IR.md) |
 | MVP1 / MVP2 | [docs/jp/MVP.md](docs/jp/MVP.md) | [docs/en/MVP.md](docs/en/MVP.md) |
 
-Implementation tracking: [Issue #1](https://github.com/tomiya7688/safe-cpp-compiler/issues/1)
+Implementation tracking:
+- [Issue #1: MVP1 compiler / validated LLVM IR](https://github.com/tomiya7688/safe-cpp-compiler/issues/1)
+- [Issue #2: safe-build.json / CMake compatibility](https://github.com/tomiya7688/safe-cpp-compiler/issues/2)
 
 ## License
 
