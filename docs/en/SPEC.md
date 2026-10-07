@@ -184,6 +184,7 @@ SafeMeaning(before) == SafeMeaning(after)
 
 - [SPEC.md](SPEC.md)
 - [CONFIG.md](CONFIG.md)
+- [BUILD.md](BUILD.md)
 - [RULES.md](RULES.md)
 - [IR.md](IR.md)
 - [MVP.md](MVP.md)
