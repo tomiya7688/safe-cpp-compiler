@@ -6,15 +6,16 @@
 
 ## 1. Purpose
 
-Safe C++ Compiler should interoperate with CMake without reimplementing CMake's full build language.
+Safe C++ Compiler interoperates with CMake without reimplementing CMake's full build language.
 
-Normal projects use a lightweight declarative JSON file:
+Native projects use lightweight declarative JSON:
 
 ```text
 safe-build.json
 ```
 
-`safe-cpp.json` contains safety policy. `safe-build.json` contains build/project configuration.
+- `safe-cpp.json` — safety policy, unsafety diagnostics, LLVM validation
+- `safe-build.json` — platform, sources, targets, output, linking, resource staging
 
 ## 2. Basic example
 
@@ -23,6 +24,17 @@ safe-build.json
   "version": 1,
   "project": {
     "name": "sample"
+  },
+  "platform": {
+    "arch": "x64",
+    "os": "windows",
+    "abi": "msvc"
+  },
+  "build": {
+    "profile": "debug",
+    "optimization": "none",
+    "debug_info": true,
+    "output_directory": "build"
   },
   "inputs": {
     "source_directories": ["src", "lib"],
@@ -33,6 +45,11 @@ safe-build.json
       "type": "application",
       "sources": ["src/**", "lib/**"],
       "defines": ["APP_VERSION=1"],
+      "output_name": "sample",
+      "links": {
+        "libraries": ["user32"],
+        "library_directories": ["vendor/lib"]
+      },
       "application_root": "Application/root",
       "copy": [
         { "from": "assets", "to": "assets" },
@@ -43,15 +60,56 @@ safe-build.json
 }
 ```
 
-## 3. Input directories
+## 3. Platform
 
-`source_directories` defines directories searched for source input.
+Human-readable target selection:
 
-`include_directories` adds C/C++ include search paths.
+```json
+{
+  "platform": {
+    "arch": "x64",
+    "os": "windows",
+    "abi": "msvc"
+  }
+}
+```
 
-Paths are relative to the project root by default.
+Initial architecture names: `x64`, `x86`, `arm64`, `arm32`.
 
-## 4. Targets
+Initial OS names: `windows`, `linux`, `macos`.
+
+Representative ABI names: `msvc`, `gnu`, `musl`, `apple`.
+
+The build system normalizes these to LLVM target information. Unsupported combinations fail clearly.
+
+An advanced direct `triple` setting may be added later. Conflicting triple and arch/os/abi settings are errors.
+
+## 4. Build settings
+
+```json
+{
+  "build": {
+    "profile": "debug",
+    "optimization": "none",
+    "debug_info": true,
+    "output_directory": "build"
+  }
+}
+```
+
+Initial profiles: `debug`, `release`.
+
+Profiles never weaken safety. Release builds must not disable required safety checks or Safe LLVM Validator.
+
+Optimization values may include `none`, `basic`, `speed`, and `size`. MVP1 may implement only `none` and `basic` initially.
+
+## 5. Inputs
+
+`source_directories` defines source search roots.
+
+`include_directories` defines C/C++ include search paths.
+
+## 6. Targets
 
 Initial target types:
 
@@ -61,106 +119,124 @@ Initial target types:
 
 MVP prioritizes `application`.
 
-Targets may define sources, include directories, defines, links, application root, and copy rules.
+Targets may define sources, include directories, defines, output name, links, application root, and copy rules.
 
-## 5. Application root
+## 7. Sources
 
-`application_root` is the staging/package root for an application target.
-
-Example:
+Target sources may use globs such as:
 
 ```json
 {
-  "application_root": "Application/root"
+  "sources": ["src/**", "lib/math/*.cpp"]
 }
 ```
+
+## 8. Defines
+
+```json
+{
+  "defines": ["APP_VERSION=1", "FEATURE_X"]
+}
+```
+
+Both name-only and `NAME=value` forms are supported.
+
+## 9. Output name
+
+`output_name` is the logical output name. Platform suffixes/prefixes are derived by the build system.
+
+For MVP1 it also names validated LLVM outputs such as `build/sample.ll` and `build/sample.bc`.
+
+## 10. Linking
+
+```json
+{
+  "links": {
+    "libraries": ["user32", "mylib"],
+    "library_directories": ["vendor/lib"]
+  }
+}
+```
+
+MVP1 may initially parse and retain these settings even though machine-code linking is not a completion requirement.
+
+## 11. Application root
+
+`application_root` is the application staging/package root.
 
 MVP may restrict it to project-relative paths.
 
-## 6. Copy rules
+## 12. Copy rules
 
 Files or directories may be copied into the application root.
 
+Absolute destinations, `..` escapes, unsafe symlink escapes, destination collisions, and missing sources are errors by default.
+
+## 13. Runtime and toolchain
+
+Platform-specific settings may be added incrementally, for example:
+
 ```json
 {
-  "copy": [
-    { "from": "assets", "to": "assets" },
-    { "from": "config/default", "to": "config" }
-  ]
+  "toolchain": {
+    "linker": "default",
+    "runtime": "dynamic"
+  }
 }
 ```
 
-Conceptually:
+Future settings may cover linker selection, static/dynamic runtime, sysroot, SDK path, Windows subsystem, and deployment target.
+
+This must not become a general-purpose scripting language.
+
+## 14. Build artifacts
+
+MVP1 primarily stages validated LLVM IR. Future machine-code builds may stage executables and resources under the application root.
+
+## 15. CMake compatibility
+
+Do not reimplement the CMake language.
+
+Use an adapter to import machine-readable CMake target/codemodel information. Native projects use `safe-build.json`.
+
+CMake export may be added later.
+
+## 16. Separation from safe-cpp.json
+
+`safe-cpp.json`: safety diagnostics and LLVM validation.
+
+`safe-build.json`: platform, build profile, source/include paths, targets, output, linking, staging/copy, and CMake integration.
+
+## 17. Path normalization
+
+JSON paths use `/` canonically. Paths are normalized and checked for root escape before file operations.
+
+## 18. CLI overrides
+
+Frequently changed values may be overridden without editing JSON, for example:
 
 ```text
-assets/**          -> Application/root/assets/**
-config/default/**  -> Application/root/config/**
+safe-cpp build --arch x64 --os windows --profile release
 ```
 
-`from` is project-root-relative.
+CLI overrides take precedence over JSON.
 
-`to` is application-root-relative.
+## 19. MVP build scope
 
-Absolute destinations and `..` escapes outside the application root are errors.
-
-Destination collisions are errors by default.
-
-Symlinks that resolve outside the application root are rejected in MVP.
-
-Missing sources are build errors.
-
-## 7. Build artifacts
-
-Future executable/resource artifacts may be staged into the application root.
-
-MVP1 primarily produces validated LLVM IR, so minimal staging such as the following is sufficient:
-
-```text
-Application/root/
-  app.ll
-  assets/
-  config/
-```
-
-## 8. CMake compatibility
-
-Safe C++ Compiler does not reimplement the CMake language.
-
-Compatibility means importing existing CMake project/target information through an adapter, while native Safe projects can use `safe-build.json` directly.
-
-Initial direction:
-
-- existing CMake project: import machine-readable target/codemodel information
-- native Safe project: use `safe-build.json`
-- exporting back to CMake may be added later
-
-The compiler does not independently interpret all CMake commands, macros, or generator expressions.
-
-## 9. Separation from safe-cpp.json
-
-`safe-cpp.json` contains safety diagnostics and LLVM validation.
-
-`safe-build.json` contains build inputs, targets, staging, copy rules, and CMake integration.
-
-## 10. Path normalization
-
-JSON paths use `/` as the canonical separator.
-
-The build system normalizes paths and checks for root escape before file operations.
-
-## 11. MVP build scope
-
-Initial implementation:
+Initial implementation includes:
 
 1. safe-build.json parser
-2. source_directories
-3. include_directories
-4. application target
-5. source globs
-6. defines
-7. application_root
-8. file/directory copy
-9. collision/root-escape validation
-10. CMake import adapter
+2. platform arch/os/abi
+3. profile/optimization/debug info/output directory
+4. source/include directories
+5. application target
+6. source globs
+7. defines
+8. output name
+9. link settings parsing
+10. application root
+11. file/directory copy
+12. collision/root-escape/symlink validation
+13. CMake import adapter
 
-Libraries, install rules, package managers, custom commands, and a scripting language may be deferred.
+Package management, install rules, arbitrary custom commands, and a general scripting language may be deferred.
