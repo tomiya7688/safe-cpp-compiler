@@ -22,7 +22,178 @@ safe-build.json
 
 安全 policy と build description を分離する。
 
-## 2. 基本例
+## 2. 設定言語
+
+`safe-build.json` は英語キー版と日本語キー版の両方を受理する。
+**動作・意味・生成される build graph は完全に同一**であり、違いは記述言語だけである。
+
+英語キー版は既定形式とする。
+
+日本語キー版を使用する場合、ファイルの**先頭のトップレベル項目**で次を宣言する。
+
+```json
+{
+  "設定言語": "日本語",
+  "版": 1
+}
+```
+
+日本語モードでは、設定キーと列挙値を日本語で記述できる。
+parser は最初に `"設定言語": "日本語"` を確認し、日本語 schema を canonical 内部 schema に正規化してから通常処理を行う。
+
+同一ファイルで英語キーと日本語キーを混在させることは原則 configuration error とする。
+project名、target名、path、macro、library名などのユーザー定義文字列は任意の言語でよい。
+
+### 2.1 日本語版の例
+
+```json
+{
+  "設定言語": "日本語",
+  "版": 1,
+
+  "プロジェクト": {
+    "名前": "sample"
+  },
+
+  "プラットフォーム": {
+    "アーキテクチャ": "x64",
+    "OS": "windows",
+    "ABI": "msvc"
+  },
+
+  "ビルド": {
+    "プロファイル": "デバッグ",
+    "最適化": "なし",
+    "デバッグ情報": true,
+    "出力ディレクトリ": "build"
+  },
+
+  "入力": {
+    "ソースディレクトリ": [
+      "src",
+      "lib"
+    ],
+    "インクルードディレクトリ": [
+      "include"
+    ]
+  },
+
+  "ターゲット": {
+    "app": {
+      "種類": "アプリケーション",
+      "ソース": [
+        "src/**",
+        "lib/**"
+      ],
+      "定義": [
+        "APP_VERSION=1"
+      ],
+      "出力名": "sample",
+      "リンク": {
+        "ライブラリ": [
+          "user32"
+        ],
+        "ライブラリディレクトリ": [
+          "vendor/lib"
+        ]
+      },
+      "アプリケーションルート": "Application/root",
+      "コピー": [
+        {
+          "コピー元": "assets",
+          "コピー先": "assets"
+        }
+      ]
+    }
+  }
+}
+```
+
+### 2.2 canonical mapping
+
+初期対応は1対1 mapping とする。
+
+| 英語 | 日本語 |
+| --- | --- |
+| `version` | `版` |
+| `project` | `プロジェクト` |
+| `name` | `名前` |
+| `platform` | `プラットフォーム` |
+| `arch` | `アーキテクチャ` |
+| `os` | `OS` |
+| `abi` | `ABI` |
+| `build` | `ビルド` |
+| `profile` | `プロファイル` |
+| `optimization` | `最適化` |
+| `debug_info` | `デバッグ情報` |
+| `output_directory` | `出力ディレクトリ` |
+| `inputs` | `入力` |
+| `source_directories` | `ソースディレクトリ` |
+| `include_directories` | `インクルードディレクトリ` |
+| `targets` | `ターゲット` |
+| `type` | `種類` |
+| `sources` | `ソース` |
+| `defines` | `定義` |
+| `output_name` | `出力名` |
+| `links` | `リンク` |
+| `libraries` | `ライブラリ` |
+| `library_directories` | `ライブラリディレクトリ` |
+| `application_root` | `アプリケーションルート` |
+| `copy` | `コピー` |
+| `from` | `コピー元` |
+| `to` | `コピー先` |
+| `toolchain` | `ツールチェーン` |
+| `linker` | `リンカー` |
+| `runtime` | `ランタイム` |
+
+列挙値も同じ意味へ正規化する。
+
+| 英語値 | 日本語値 |
+| --- | --- |
+| `debug` | `デバッグ` |
+| `release` | `リリース` |
+| `none` | `なし` |
+| `basic` | `基本` |
+| `speed` | `速度` |
+| `size` | `サイズ` |
+| `application` | `アプリケーション` |
+| `static_library` | `静的ライブラリ` |
+| `shared_library` | `共有ライブラリ` |
+| `dynamic` | `動的` |
+| `static` | `静的` |
+
+`x64`, `x86`, `arm64`, `arm32`, `windows`, `linux`, `macos`, `msvc`, `gnu`, `musl` など固有の platform/ABI 名は canonical token のままとしてよい。
+
+### 2.3 完全同値
+
+以下の2つは同一 build graph を生成しなければならない。
+
+英語:
+
+```json
+{
+  "version": 1,
+  "build": {
+    "profile": "debug"
+  }
+}
+```
+
+日本語:
+
+```json
+{
+  "設定言語": "日本語",
+  "版": 1,
+  "ビルド": {
+    "プロファイル": "デバッグ"
+  }
+}
+```
+
+日本語 mode は機能差・既定値差・安全性差を持たない。
+
+## 3. 基本例
 
 ```json
 {
@@ -91,7 +262,7 @@ safe-build.json
 }
 ```
 
-## 3. platform
+## 4. platform
 
 compile target を人間が読みやすい形で指定する。
 
@@ -168,7 +339,7 @@ build system が LLVM target triple を導出する。
 
 `triple` と arch/os/abi が同時指定され矛盾する場合は build error。
 
-## 4. build
+## 5. build
 
 ```json
 {
@@ -221,7 +392,7 @@ build artifact の base directory。
 
 project root 相対 path を基本とする。
 
-## 5. inputs
+## 6. inputs
 
 ### 5.1 source_directories
 
@@ -245,7 +416,7 @@ include search path。
 
 将来 `system_include_directories` を追加可能。
 
-## 6. targets
+## 7. targets
 
 初期 target type:
 
@@ -265,7 +436,7 @@ target が持てる基本設定:
 - `application_root`
 - `copy`
 
-## 7. sources
+## 8. sources
 
 target が実際に compile する source を glob で指定できる。
 
@@ -280,7 +451,7 @@ target が実際に compile する source を glob で指定できる。
 
 `source_directories` は探索 root、`sources` は target への選択とする。
 
-## 8. defines
+## 9. defines
 
 preprocessor define。
 
@@ -295,7 +466,7 @@ preprocessor define。
 
 値なし define と `NAME=value` を許可する。
 
-## 9. output_name
+## 10. output_name
 
 target の論理出力名。
 
@@ -323,7 +494,7 @@ build/sample.ll
 build/sample.bc
 ```
 
-## 10. links
+## 11. links
 
 ```json
 {
@@ -351,7 +522,7 @@ MVP1 は machine code/link が必須ではないため、設定の parse/保持�
 
 将来必要なら `frameworks`、`link_options` 等を追加するが、raw linker option は通常設定より後回しとする。
 
-## 11. application_root
+## 12. application_root
 
 application target の staging/package root。
 
@@ -365,7 +536,7 @@ build artifact と resource copy の配置基準。
 
 MVP では project root 相対 path のみでよい。
 
-## 12. directory/file copy
+## 13. directory/file copy
 
 ```json
 {
@@ -417,7 +588,7 @@ application root 外へ解決される symlink は error。
 
 将来 optional resource は明示 `optional: true` を追加可能。
 
-## 13. runtime / toolchain
+## 14. runtime / toolchain
 
 通常必要になりやすいが platform-specific なので段階的に追加する。
 
@@ -443,7 +614,7 @@ application root 外へ解決される symlink は error。
 
 ただし CMake のように任意 command を実行する script language にはしない。
 
-## 14. build artifact
+## 15. build artifact
 
 MVP1 は validated LLVM IR が中心。
 
@@ -470,7 +641,7 @@ Application/root/
 
 のように配置できる。
 
-## 15. CMake compatibility
+## 16. CMake compatibility
 
 CMake language を再実装しない。
 
@@ -488,7 +659,7 @@ CMake language を再実装しない。
 
 CMake command/macro/generator expression を独自に全面解釈しない。
 
-## 16. safe-cpp.json との関係
+## 17. safe-cpp.json との関係
 
 `safe-cpp.json`:
 
@@ -510,7 +681,7 @@ CMake command/macro/generator expression を独自に全面解釈しない。
 - copy/staging
 - CMake adapter
 
-## 17. path normalization
+## 18. path normalization
 
 JSON path は `/` を canonical separator とする。
 
@@ -518,7 +689,7 @@ OS path への変換は build system が行う。
 
 file operation 前に normalize し root escape を検査する。
 
-## 18. CLI override
+## 19. CLI override
 
 通常の build system と同様、頻繁に変える値は CLI override を将来提供できる。
 
@@ -532,7 +703,7 @@ JSON を書き換えず CI matrix / cross compile を行えるようにする。
 
 CLI と JSON が競合する場合は CLI を優先する。
 
-## 19. MVP build scope
+## 20. MVP build scope
 
 最初に必要:
 
