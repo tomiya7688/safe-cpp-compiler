@@ -276,7 +276,7 @@ compile target を人間が読みやすい形で指定する。
 }
 ```
 
-### 3.1 arch
+### 4.1 arch
 
 初期名称:
 
@@ -297,7 +297,7 @@ arm64 -> aarch64
 設定形式として名称を定義することと、その target を現在の compiler build が実際にサポートすることは別である。
 未対応 target は明確な build error とする。
 
-### 3.2 os
+### 4.2 os
 
 初期名称:
 
@@ -307,7 +307,7 @@ arm64 -> aarch64
 
 将来必要に応じて追加する。
 
-### 3.3 abi
+### 4.3 abi
 
 任意指定。
 
@@ -320,7 +320,7 @@ arm64 -> aarch64
 
 省略時は os/toolchain の既定値を使用できる。
 
-### 3.4 LLVM target triple
+### 4.4 LLVM target triple
 
 通常利用者は arch/os/abi を指定するだけでよい。
 build system が LLVM target triple を導出する。
@@ -352,7 +352,7 @@ build system が LLVM target triple を導出する。
 }
 ```
 
-### 4.1 profile
+### 5.1 profile
 
 初期値:
 
@@ -363,7 +363,7 @@ profile は便利な preset であり、安全性の強弱を意味しない。
 
 **release でも safety check や Safe LLVM Validator を無効化してはならない。**
 
-### 4.2 optimization
+### 5.2 optimization
 
 初期値候補:
 
@@ -376,7 +376,7 @@ MVP1 では `none` / `basic` だけ実装してもよい。
 
 optimization は Safe C++ Compiler の意味論を弱めてはならない。
 
-### 4.3 debug_info
+### 5.3 debug_info
 
 debug metadata を生成するか。
 
@@ -386,7 +386,7 @@ debug metadata を生成するか。
 }
 ```
 
-### 4.4 output_directory
+### 5.4 output_directory
 
 build artifact の base directory。
 
@@ -394,7 +394,7 @@ project root 相対 path を基本とする。
 
 ## 6. inputs
 
-### 5.1 source_directories
+### 6.1 source_directories
 
 source 探索 directory。
 
@@ -404,7 +404,7 @@ source 探索 directory。
 }
 ```
 
-### 5.2 include_directories
+### 6.2 include_directories
 
 include search path。
 
@@ -510,11 +510,11 @@ build/sample.bc
 }
 ```
 
-### 10.1 libraries
+### 11.1 libraries
 
 system library または project library の論理名。
 
-### 10.2 library_directories
+### 11.2 library_directories
 
 linker の library search path。
 
@@ -560,11 +560,11 @@ assets/**          -> Application/root/assets/**
 config/default/**  -> Application/root/config/**
 ```
 
-### 12.1 from
+### 13.1 from
 
 project root 相対の file/directory。
 
-### 12.2 to
+### 13.2 to
 
 `application_root` 相対 path。
 
@@ -574,15 +574,15 @@ project root 相対の file/directory。
 - `..` による root escape
 - platform-specific trick による root escape
 
-### 12.3 collision
+### 13.3 collision
 
 既定では destination collision は build error。
 
-### 12.4 symlink
+### 13.4 symlink
 
 application root 外へ解決される symlink は error。
 
-### 12.5 missing source
+### 13.5 missing source
 
 存在しない `from` は build error。
 
