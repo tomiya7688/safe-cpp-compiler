@@ -186,6 +186,7 @@ SafeMeaning(before) == SafeMeaning(after)
 - [CONFIG.md](CONFIG.md)
 - [BUILD.md](BUILD.md)
 - [RULES.md](RULES.md)
+- [LIBRARIES.md](LIBRARIES.md)
 - [IR.md](IR.md)
 - [MVP.md](MVP.md)
 
