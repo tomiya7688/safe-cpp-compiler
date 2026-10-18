@@ -49,7 +49,11 @@ UB that can be checked dynamically may become a defined runtime trap: signed ove
 
 Do not ban APIs by name alone. Prove their safety conditions where possible, warn when defined lowering is possible but confidence is limited, and error when safety cannot be guaranteed.
 
-## 5. Ignore
+## 5. Library/API warnings
+
+Library/API safety rules are defined in [LIBRARIES.md](LIBRARIES.md). Risky API use normally produces an `unsafety warning`; when safety cannot be guaranteed, it becomes an `unsafety error`.
+
+## 6. Ignore
 
 ignore.rules and ignore.files affect source-level safety diagnostics.
 
