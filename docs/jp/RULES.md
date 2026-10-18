@@ -67,7 +67,11 @@ defined lowering は可能だが注意が必要 → unsafety warning。
 
 安全条件を保証できない → unsafety error。
 
-## 5. ignore
+## 5. Library/API warnings
+
+Library/API safety rules are defined in [LIBRARIES.md](LIBRARIES.md). Dangerous API usage should normally produce `unsafety warning`; when safety cannot be guaranteed, produce `unsafety error`.
+
+## 6. ignore
 
 `ignore.rules` は指定 rule の policy diagnostic を除外できる。
 `ignore.files` は指定 file を safety checking の legacy boundary とする。
