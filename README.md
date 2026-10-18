@@ -30,6 +30,7 @@ Japanese documents are authoritative. English documents are translations.
 | JSON policy | [docs/jp/CONFIG.md](docs/jp/CONFIG.md) | [docs/en/CONFIG.md](docs/en/CONFIG.md) |
 | Build configuration | [docs/jp/BUILD.md](docs/jp/BUILD.md) | [docs/en/BUILD.md](docs/en/BUILD.md) |
 | Unsafety rules | [docs/jp/RULES.md](docs/jp/RULES.md) | [docs/en/RULES.md](docs/en/RULES.md) |
+| Library/API safety catalog | [docs/jp/LIBRARIES.md](docs/jp/LIBRARIES.md) | [docs/en/LIBRARIES.md](docs/en/LIBRARIES.md) |
 | Safe LLVM IR / Validator | [docs/jp/IR.md](docs/jp/IR.md) | [docs/en/IR.md](docs/en/IR.md) |
 | MVP1 / MVP2 | [docs/jp/MVP.md](docs/jp/MVP.md) | [docs/en/MVP.md](docs/en/MVP.md) |
 
