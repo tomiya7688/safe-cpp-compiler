@@ -19,6 +19,7 @@ Default file: project-root `safe-cpp.json`.
     "rules": [],
     "files": []
   },
+  "library_catalogs": [],
   "diagnostics": {
     "warnings_as_errors": false,
     "show_rule_keys": false
@@ -44,7 +45,13 @@ ignore.rules uses stable rule keys. ignore.files uses project-root-relative glob
 
 Ignore applies only to source-level safety diagnostics and cannot bypass LLVM validation.
 
-## 4. Diagnostics
+## 4. library_catalogs
+
+Additional project-local library/API safety catalogs may be loaded by project-root-relative path.
+
+Built-in standard/C library catalogs remain active; project catalogs add or strengthen rules.
+
+## 5. Diagnostics
 
 `warnings_as_errors` promotes unsafety warnings to unsafety errors.
 
@@ -52,10 +59,10 @@ Ignore applies only to source-level safety diagnostics and cannot bypass LLVM va
 
 Future per-rule severity overrides may be supported, but hard semantic invariants and LLVM validation errors cannot be downgraded.
 
-## 5. LLVM validation
+## 6. LLVM validation
 
 For MVP1, LLVM validation is mandatory and includes the LLVM verifier plus Safe LLVM Validator.
 
-## 6. Target
+## 7. Target
 
 Target triple and ABI settings are configurable independently from language-standard selection.
