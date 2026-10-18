@@ -37,6 +37,7 @@ Japanese documents are authoritative. English documents are translations.
 Implementation tracking:
 - [Issue #1: MVP1 compiler / validated LLVM IR](https://github.com/tomiya7688/safe-cpp-compiler/issues/1)
 - [Issue #2: safe-build.json / CMake compatibility](https://github.com/tomiya7688/safe-cpp-compiler/issues/2)
+- [Issue #3: standard/third-party library safety catalog](https://github.com/tomiya7688/safe-cpp-compiler/issues/3)
 
 ## License
 
