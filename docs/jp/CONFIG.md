@@ -19,6 +19,7 @@
     "rules": [],
     "files": []
   },
+  "library_catalogs": [],
   "diagnostics": {
     "warnings_as_errors": false,
     "show_rule_keys": false
@@ -46,7 +47,21 @@ MVP1 baseline:
 ignore は source-level safety diagnostics 用。
 LLVM validator の拒否を無効化する用途には使わない。
 
-## 4. diagnostics
+## 4. library_catalogs
+
+追加の library/API safety catalog を project root 相対 path で指定する。
+
+```json
+{
+  "library_catalogs": [
+    "safe-library-rules.json"
+  ]
+}
+```
+
+標準/Cライブラリの built-in catalog は常に利用可能。project catalog は追加・強化用とする。
+
+## 5. diagnostics
 
 `warnings_as_errors`: unsafety warning を unsafety error として扱う。
 
@@ -64,7 +79,7 @@ unsafety warning: raw pointer crosses FFI boundary
 unsafety warning[ffi_raw_pointer]: raw pointer crosses FFI boundary
 ```
 
-## 5. severity override
+## 6. severity override
 
 将来:
 
@@ -81,13 +96,13 @@ unsafety warning[ffi_raw_pointer]: raw pointer crosses FFI boundary
 
 ただし semantic safety invariant や LLVM Validator error を warning へ下げてはならない。
 
-## 6. llvm_validation
+## 7. llvm_validation
 
 MVP1 では `enabled: true` が必須。
 
 最低限、LLVM structural verification と Safe LLVM Validator を実行する。
 
-## 7. target
+## 8. target
 
 target triple、ABI などを指定可能。
 言語規格の基準とは分離する。
